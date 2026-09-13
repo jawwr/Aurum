@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { MonthSelector } from "@/components/layout/MonthSelector";
 import { YearSelector } from "@/components/layout/YearSelector";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -9,6 +8,7 @@ import { useDashboardSummary } from "@/hooks/useDashboard";
 import { useTransactionYears } from "@/hooks/useTransactions";
 import { formatCurrency, formatSignedCurrency } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
+import { useQueryState } from "@/hooks/useQueryState";
 
 /** Share of income left over after spending (net / real_income). `null` when
  * there was no income to take a share of, rather than a misleading 0%. */
@@ -24,8 +24,8 @@ function formatPercent(value: number): string {
 export function DashboardPage() {
   const { t } = useTranslation();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useQueryState("year", now.getFullYear());
+  const [month, setMonth] = useQueryState("month", now.getMonth() + 1);
   const { data: years } = useTransactionYears();
 
   const { data, isLoading, isError } = useDashboardSummary(year, month);

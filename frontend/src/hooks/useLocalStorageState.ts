@@ -1,15 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-export function useLocalStorageState(key: string, initial: boolean) {
-  const [value, setValue] = useState<boolean>(() => {
-    const stored = localStorage.getItem(key);
-    return stored === null ? initial : stored === "true";
+const AURUM_PREFIX_KEY = "aurum:";
+
+export function useLocalStorageState<T>(key: string, initialValue: T) {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const storedValue = localStorage.getItem(AURUM_PREFIX_KEY + key);
+      if (storedValue !== null) {
+        return JSON.parse(storedValue);
+      }
+    } catch (error) {
+      console.error(`Error reading localStorage key "${key}":`, error);
+    }
+    return initialValue;
   });
 
-  const update = (next: boolean) => {
-    setValue(next);
-    localStorage.setItem(key, String(next));
-  };
+  useEffect(() => {
+    try {
+      localStorage.setItem(AURUM_PREFIX_KEY + key, JSON.stringify(value));
+    } catch (error) {
+      console.error(`Error writing localStorage key "${key}":`, error);
+    }
+  }, [AURUM_PREFIX_KEY + key, value]);
 
-  return [value, update] as const;
+  return [value, setValue] as const;
 }
+

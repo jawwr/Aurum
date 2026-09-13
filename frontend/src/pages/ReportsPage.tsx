@@ -16,6 +16,7 @@ import { computeRange, type CustomYearRange, type RangePreset } from "@/lib/date
 import { useTranslation } from "@/lib/i18n";
 import { buildHierarchicalCategories, translateCategoryName } from "@/lib/categoryLabels";
 import type { Transaction } from "@/types";
+import { useQueryState } from "@/hooks/useQueryState";
 
 const PAGE_SIZE = 20;
 
@@ -30,13 +31,11 @@ export function ReportsPage() {
   ];
   const { data: categories } = useCategories();
   const { data: years } = useTransactionYears();
-  const [categoryId, setCategoryId] = useState<number | null>(null);
-  const [range, setRange] = useState<RangePreset>("all");
-  const [customRange, setCustomRange] = useState<CustomYearRange>({
-    fromYear: now.getFullYear(),
-    toYear: now.getFullYear(),
-  });
-  const [sort, setSort] = useState<TransactionSort>("date_desc");
+  const [categoryId, setCategoryId] = useQueryState<number | null>("category_id", null);
+  const [range, setRange] = useQueryState<RangePreset>("range", "all");
+  const [customRangeFrom, setCustomRangeFrom] = useQueryState("custom_from", now.getFullYear());
+  const [customRangeTo, setCustomRangeTo] = useQueryState("custom_to", now.getFullYear());
+  const [sort, setSort] = useQueryState<TransactionSort>("sort", "date_desc");
   const [page, setPage] = useState(1);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -48,6 +47,7 @@ export function ReportsPage() {
     }
   }, [categories, categoryId]);
 
+  const customRange: CustomYearRange = { fromYear: customRangeFrom, toYear: customRangeTo };
   const { startDate, endDate } = computeRange(range, customRange);
   const { data: ranking, isLoading: isRankingLoading } = useCategoryRanking("expense", startDate, endDate);
   const { data: report, isLoading: isReportLoading } = useCategorySpendingReport(categoryId, startDate, endDate);
@@ -135,7 +135,8 @@ export function ReportsPage() {
               fromYear={customRange.fromYear}
               toYear={customRange.toYear}
               onChange={(value) => {
-                setCustomRange(value);
+                setCustomRangeFrom(value.fromYear);
+                setCustomRangeTo(value.toYear);
                 setPage(1);
               }}
             />

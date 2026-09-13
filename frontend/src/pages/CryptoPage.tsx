@@ -22,6 +22,7 @@ import {
 } from "@/hooks/useCrypto";
 import { getIntlLocale } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
+import { useQueryState } from "@/hooks/useQueryState";
 import type { CryptoHolding, CryptoPortfolio, CryptoRange, CryptoTransaction, RiskLevel } from "@/types";
 
 function formatSyncedAt(iso: string): string {
@@ -32,14 +33,14 @@ export function CryptoPage() {
   const { t } = useTranslation();
   // "all" by default — a 30-day window makes a portfolio that's actually
   // grown steadily for years look demotivating whenever it's mid-dip.
-  const [range, setRange] = useState<CryptoRange>("all");
+  const [range, setRange] = useQueryState<CryptoRange>("range", "all");
   // Single "hide balance" switch for the whole tab — owned here so every
   // money-displaying section (chart, stats, allocation, table, trade
   // history) masks together instead of the toggle only affecting whichever
   // component happened to own it.
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = useQueryState("hidden", false);
   // null = "All portfolios" tab.
-  const [portfolioFilter, setPortfolioFilter] = useState<number | null>(null);
+  const [portfolioFilter, setPortfolioFilter] = useQueryState<number | null>("portfolio_filter", null);
   const { data: portfolios } = useCryptoPortfolios();
   const { data, isLoading } = useCryptoHoldings(portfolioFilter);
   const { data: history, isLoading: isHistoryLoading } = useCryptoHistory(range, portfolioFilter);

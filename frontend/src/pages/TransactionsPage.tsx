@@ -8,6 +8,8 @@ import { MonthSelector } from "@/components/layout/MonthSelector";
 import { YearSelector } from "@/components/layout/YearSelector";
 import { TransactionsTable } from "@/components/transactions/TransactionsTable";
 import { TransactionFormModal } from "@/components/transactions/TransactionFormModal";
+import { useQueryState } from "@/hooks/useQueryState";
+
 import { useTransactions, useDeleteTransaction, useTransactionYears } from "@/hooks/useTransactions";
 import { useCategories } from "@/hooks/useCategories";
 import { useTags } from "@/hooks/useTags";
@@ -18,36 +20,17 @@ import type { Transaction, TransactionType } from "@/types";
 
 const PAGE_SIZE = 20;
 
-/** Parses a query-param month, falling back to `fallback` for anything
- * missing or out of range (e.g. a hand-edited URL). Must check `value`
- * for null before `Number()` — `Number(null)` is 0, not NaN, so a missing
- * param would otherwise silently pass the integer check and clamp to 1. */
-function parseMonthParam(value: string | null, fallback: number): number {
-  if (value === null) return fallback;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 12 ? parsed : fallback;
-}
-
-function parseYearParam(value: string | null, fallback: number): number {
-  if (value === null) return fallback;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export function TransactionsPage() {
   const { t, language } = useTranslation();
   const now = new Date();
-  // Deep-linked from the Dashboard's "All transactions" link, which carries
-  // the month/year the user was already looking at (?year=&month=) so this
-  // page doesn't reset back to the current month.
-  const [searchParams] = useSearchParams();
-  const [year, setYear] = useState(() => parseYearParam(searchParams.get("year"), now.getFullYear()));
-  const [month, setMonth] = useState(() => parseMonthParam(searchParams.get("month"), now.getMonth() + 1));
-  const [type, setType] = useState<TransactionType | "">("");
-  const [categoryId, setCategoryId] = useState<string>("");
-  const [tagId, setTagId] = useState<string>("");
-  const [sort, setSort] = useState<TransactionSort>("date_desc");
-  const [page, setPage] = useState(1);
+
+  const [year, setYear] = useQueryState("year", now.getFullYear());
+  const [month, setMonth] = useQueryState("month", now.getMonth() + 1);
+  const [type, setType] = useQueryState<TransactionType | "">("type", "");
+  const [categoryId, setCategoryId] = useQueryState("category", "");
+  const [tagId, setTagId] = useQueryState("tag", "");
+  const [sort, setSort] = useQueryState<TransactionSort>("sort", "date_desc");
+  const [page, setPage] = useQueryState("page", 1);
 
   // Raw text follows every keystroke; the debounced value is what actually
   // drives the query, so we're not refetching on every character typed.

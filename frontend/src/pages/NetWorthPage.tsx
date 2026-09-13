@@ -12,6 +12,7 @@ import { AlertBanner } from "@/components/insights/AlertBanner";
 import { useNetWorthSummary } from "@/hooks/useNetWorth";
 import { useAssets, useDeleteAsset } from "@/hooks/useAssets";
 import { useTranslation } from "@/lib/i18n";
+import { useQueryState } from "@/hooks/useQueryState";
 import type { Asset, NetWorthRange } from "@/types";
 
 export function NetWorthPage() {
@@ -19,7 +20,7 @@ export function NetWorthPage() {
   // Defaults to 5 years: a short window can show a dip whenever spending
   // briefly outpaces recorded income, which reads as decline even though
   // the long-run trend is up — 5y is long enough to make that trend visible.
-  const [range, setRange] = useState<NetWorthRange>("5y");
+  const [range, setRange] = useQueryState<NetWorthRange>("networth_range", "5y");
   const { data: summary, isLoading: isSummaryLoading } = useNetWorthSummary(range);
   const { data: assets, isLoading: isAssetsLoading } = useAssets();
   const deleteAsset = useDeleteAsset();

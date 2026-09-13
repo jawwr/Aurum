@@ -11,13 +11,14 @@ import { useBudgets, useBudgetStatus, useDeleteBudget } from "@/hooks/useBudgets
 import { useTransactionYears } from "@/hooks/useTransactions";
 import { useTranslation } from "@/lib/i18n";
 import { translateCategoryName } from "@/lib/categoryLabels";
+import { useQueryState } from "@/hooks/useQueryState";
 import type { Budget, BudgetStatus } from "@/types";
 
 export function BudgetPage() {
   const { t } = useTranslation();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useQueryState("year", now.getFullYear());
+  const [month, setMonth] = useQueryState("month", now.getMonth() + 1);
   const { data: years } = useTransactionYears();
 
   const { data: budgets } = useBudgets();
