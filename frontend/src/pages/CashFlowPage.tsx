@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { PillSelector } from "@/components/layout/PillSelector";
 import { YearRangeSelector } from "@/components/layout/YearSelector";
 import { CashFlowChart } from "@/components/cashflow/CashFlowChart";
@@ -6,13 +5,14 @@ import { useCashFlow } from "@/hooks/useCashFlow";
 import { useTransactionYears } from "@/hooks/useTransactions";
 import { computeRange, type CustomYearRange, type RangePreset } from "@/lib/dateRange";
 import { useTranslation } from "@/lib/i18n";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 
 export function CashFlowPage() {
   const { t } = useTranslation();
   const now = new Date();
   const { data: years } = useTransactionYears();
-  const [range, setRange] = useState<RangePreset>("this_year");
-  const [customRange, setCustomRange] = useState<CustomYearRange>({
+  const [range, setRange] = useLocalStorageState<RangePreset>("cashflow_range", "this_year");
+  const [customRange, setCustomRange] = useLocalStorageState<CustomYearRange>("cashflow_custom_range", {
     fromYear: now.getFullYear(),
     toYear: now.getFullYear(),
   });

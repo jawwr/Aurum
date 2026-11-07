@@ -16,6 +16,7 @@ import { computeRange, type CustomYearRange, type RangePreset } from "@/lib/date
 import { useTranslation } from "@/lib/i18n";
 import { buildHierarchicalCategories, translateCategoryName } from "@/lib/categoryLabels";
 import type { Transaction } from "@/types";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 
 const PAGE_SIZE = 20;
 
@@ -30,13 +31,13 @@ export function ReportsPage() {
   ];
   const { data: categories } = useCategories();
   const { data: years } = useTransactionYears();
-  const [categoryId, setCategoryId] = useState<number | null>(null);
-  const [range, setRange] = useState<RangePreset>("all");
-  const [customRange, setCustomRange] = useState<CustomYearRange>({
+  const [categoryId, setCategoryId] = useLocalStorageState<number | null>("reports_category_id", null);
+  const [range, setRange] = useLocalStorageState<RangePreset>("reports_range", "all");
+  const [customRange, setCustomRange] = useLocalStorageState<CustomYearRange>("reports_custom_range", {
     fromYear: now.getFullYear(),
     toYear: now.getFullYear(),
   });
-  const [sort, setSort] = useState<TransactionSort>("date_desc");
+  const [sort, setSort] = useLocalStorageState<TransactionSort>("reports_sort", "date_desc");
   const [page, setPage] = useState(1);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalOpen, setModalOpen] = useState(false);

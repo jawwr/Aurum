@@ -8,6 +8,8 @@ import { MonthSelector } from "@/components/layout/MonthSelector";
 import { YearSelector } from "@/components/layout/YearSelector";
 import { TransactionsTable } from "@/components/transactions/TransactionsTable";
 import { TransactionFormModal } from "@/components/transactions/TransactionFormModal";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
+
 import { useTransactions, useDeleteTransaction, useTransactionYears } from "@/hooks/useTransactions";
 import { useCategories } from "@/hooks/useCategories";
 import { useTags } from "@/hooks/useTags";
@@ -41,13 +43,13 @@ export function TransactionsPage() {
   // the month/year the user was already looking at (?year=&month=) so this
   // page doesn't reset back to the current month.
   const [searchParams] = useSearchParams();
-  const [year, setYear] = useState(() => parseYearParam(searchParams.get("year"), now.getFullYear()));
-  const [month, setMonth] = useState(() => parseMonthParam(searchParams.get("month"), now.getMonth() + 1));
-  const [type, setType] = useState<TransactionType | "">("");
-  const [categoryId, setCategoryId] = useState<string>("");
-  const [tagId, setTagId] = useState<string>("");
-  const [sort, setSort] = useState<TransactionSort>("date_desc");
-  const [page, setPage] = useState(1);
+  const [year, setYear] = useLocalStorageState("transactions_year", parseYearParam(searchParams.get("year"), now.getFullYear()));
+  const [month, setMonth] = useLocalStorageState("transactions_month", parseMonthParam(searchParams.get("month"), now.getMonth() + 1));
+  const [type, setType] = useLocalStorageState<TransactionType | "">("transactions_type", "");
+  const [categoryId, setCategoryId] = useLocalStorageState("transactions_category", "");
+  const [tagId, setTagId] = useLocalStorageState("transactions_tag", "");
+  const [sort, setSort] = useLocalStorageState<TransactionSort>("transactions_sort", "date_desc");
+  const [page, setPage] = useLocalStorageState("transactions_page_number", 1);
 
   // Raw text follows every keystroke; the debounced value is what actually
   // drives the query, so we're not refetching on every character typed.
