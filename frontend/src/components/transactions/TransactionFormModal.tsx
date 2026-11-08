@@ -6,6 +6,7 @@ import { Input, Label, Select } from "@/components/ui/Input";
 import { TagInput } from "@/components/transactions/TagInput";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useCategories } from "@/hooks/useCategories";
+import { useRecurring } from "@/hooks/useRecurring";
 import { useCreateTransaction, useUpdateTransaction } from "@/hooks/useTransactions";
 import { useTranslation } from "@/lib/i18n";
 import { buildHierarchicalCategories, translateCategoryName } from "@/lib/categoryLabels";
@@ -32,6 +33,7 @@ const EMPTY_FORM = {
   merchant: "",
   notes: "",
   date: todayIso(),
+  recurring_transaction_id: "",
 };
 
 interface SplitRowState {
@@ -68,6 +70,7 @@ export function TransactionFormModal({ open, onClose, transaction }: Transaction
   const { t, language } = useTranslation();
   const { data: accounts } = useAccounts();
   const { data: categories } = useCategories();
+  const { data: recurringItems } = useRecurring();
   const createTransaction = useCreateTransaction();
   const updateTransaction = useUpdateTransaction();
 
@@ -103,6 +106,9 @@ export function TransactionFormModal({ open, onClose, transaction }: Transaction
         merchant: transaction.merchant ?? "",
         notes: transaction.notes ?? "",
         date: transaction.date,
+        recurring_transaction_id: transaction.recurring_transaction_id
+          ? String(transaction.recurring_transaction_id)
+          : "",
       });
       setTags(transaction.tags);
       setSplitMode(hasSplits);
@@ -246,6 +252,8 @@ export function TransactionFormModal({ open, onClose, transaction }: Transaction
       date: form.date,
       tag_ids: tags.map((tag) => tag.id),
       splits,
+      // Any transaction type may belong to any recurring payment.
+      recurring_transaction_id: form.recurring_transaction_id ? Number(form.recurring_transaction_id) : null,
     };
 
     try {
@@ -473,6 +481,22 @@ export function TransactionFormModal({ open, onClose, transaction }: Transaction
             )}
           </div>
         )}
+
+        <div>
+          <Label htmlFor="recurring">{t("transactions.form.recurringLabel")}</Label>
+          <Select
+            id="recurring"
+            value={form.recurring_transaction_id}
+            onChange={(event) => setForm((prev) => ({ ...prev, recurring_transaction_id: event.target.value }))}
+          >
+            <option value="">{t("transactions.form.noRecurring")}</option>
+            {(recurringItems ?? []).map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.description}
+              </option>
+            ))}
+          </Select>
+        </div>
 
         <div>
           <Label htmlFor="merchant">{t("transactions.form.merchantLabel")}</Label>
