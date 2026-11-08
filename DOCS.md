@@ -398,7 +398,7 @@ the UI). This is deliberate: a missed week never silently back-fills a pile of t
 | `POST` | `/recurring` | Create a template. |
 | `PATCH` | `/recurring/{id}` | Update a template (partial). Set `is_active: false` to pause. |
 | `DELETE` | `/recurring/{id}` | Delete a template (does not touch already-posted transactions). |
-| `POST` | `/recurring/{id}/post` | Create a real transaction from the template, dated today, and advance the schedule. |
+| `POST` | `/recurring/{id}/post` | Create a real transaction from the template, dated today, and advance the schedule. Returns `409` if the template was already posted in the current period (calendar month / ISO week / calendar year, by frequency). |
 
 **Create body:** same shape as `TransactionCreate` minus `date`/`tag_ids`, plus:
 
@@ -419,7 +419,8 @@ the UI). This is deliberate: a missed week never silently back-fills a pile of t
 falls back to Feb 28 in non-leap years).
 
 **Response** (`RecurringTransactionRead`) adds computed fields: `next_due_date`, `is_due` (boolean),
-`days_until_due` (negative if overdue), plus denormalized `account_name`/`category_name`/etc. for
+`days_until_due` (negative if overdue), `is_paid_current_period` (boolean; the UI hides the "Post"
+button while it is `true`), plus denormalized `account_name`/`category_name`/etc. for
 display without extra lookups.
 
 ## Budgets
