@@ -69,3 +69,7 @@ class RecurringTransactionRead(BaseModel):
     next_due_date: date_
     is_due: bool
     days_until_due: int
+    # True once the template has been posted in the current period (calendar
+    # month for monthly, ISO week for weekly, calendar year for yearly) —
+    # the "Post now" action is unavailable until the next period starts.
+    is_paid_current_period: bool

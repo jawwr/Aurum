@@ -69,15 +69,17 @@ export function RecurringList({ items, onPost, onEdit, onDelete, isPosting }: Re
             </span>
 
             <span className="flex shrink-0 gap-1">
-              <button
-                type="button"
-                aria-label={t("recurring.postLabel")}
-                disabled={isPosting}
-                onClick={() => onPost(item)}
-                className="rounded-md p-1.5 text-text-muted hover:bg-surface-2 hover:text-success disabled:opacity-50"
-              >
-                <CalendarCheck size={15} />
-              </button>
+              {!item.is_paid_current_period && (
+                <button
+                  type="button"
+                  aria-label={t("recurring.postLabel")}
+                  disabled={isPosting}
+                  onClick={() => onPost(item)}
+                  className="rounded-md p-1.5 text-text-muted hover:bg-surface-2 hover:text-success disabled:opacity-50"
+                >
+                  <CalendarCheck size={15} />
+                </button>
+              )}
               <button
                 type="button"
                 aria-label={t("common.edit")}

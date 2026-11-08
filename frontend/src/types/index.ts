@@ -147,6 +147,7 @@ export interface RecurringTransaction {
   next_due_date: string;
   is_due: boolean;
   days_until_due: number;
+  is_paid_current_period: boolean;
 }
 
 export interface RecurringTransactionInput {

@@ -68,6 +68,25 @@ def _next_due_date(recurring: RecurringTransaction) -> date_:
     return _advance(recurring.last_posted_date, recurring.frequency)
 
 
+def _period_key(day: date_, frequency: RecurringFrequency) -> tuple[int, int]:
+    """Identifies the calendar period a date falls into for the given
+    frequency: ISO (year, week) for weekly, (year, month) for monthly and
+    (year, 0) for yearly."""
+    if frequency == RecurringFrequency.WEEKLY:
+        iso = day.isocalendar()
+        return (iso.year, iso.week)
+    if frequency == RecurringFrequency.MONTHLY:
+        return (day.year, day.month)
+    return (day.year, 0)
+
+
+def _is_paid_in_current_period(recurring: RecurringTransaction, today: date_) -> bool:
+    last_posted = recurring.last_posted_date
+    if last_posted is None:
+        return False
+    return _period_key(last_posted, recurring.frequency) == _period_key(today, recurring.frequency)
+
+
 def _to_read(recurring: RecurringTransaction) -> RecurringTransactionRead:
     next_due = _next_due_date(recurring)
     today = date_.today()
@@ -93,6 +112,7 @@ def _to_read(recurring: RecurringTransaction) -> RecurringTransactionRead:
         next_due_date=next_due,
         is_due=recurring.is_active and next_due <= today,
         days_until_due=(next_due - today).days,
+        is_paid_current_period=_is_paid_in_current_period(recurring, today),
     )
 
 
@@ -145,9 +165,14 @@ async def delete_recurring(session: AsyncSession, recurring_id: int) -> None:
 
 async def post_recurring(session: AsyncSession, recurring_id: int) -> RecurringTransactionRead:
     """Creates a real Transaction from the template, dated today, and moves
-    last_posted_date forward — the only thing that advances the schedule."""
+    last_posted_date forward — the only thing that advances the schedule.
+
+    Refuses (409) to post twice within the same period, so a double click or
+    a second open tab can't create a duplicate transaction."""
     recurring = await _get_or_404(session, recurring_id)
     today = date_.today()
+    if _is_paid_in_current_period(recurring, today):
+        raise HTTPException(status_code=409, detail="Recurring transaction is already posted for the current period")
 
     session.add(
         Transaction(
