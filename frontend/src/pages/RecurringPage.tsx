@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { RecurringList } from "@/components/recurring/RecurringList";
 import { RecurringFormModal } from "@/components/recurring/RecurringFormModal";
+import { RecurringPostModal } from "@/components/recurring/RecurringPostModal";
 import { useDeleteRecurring, usePostRecurring, useRecurring } from "@/hooks/useRecurring";
 import { useTranslation } from "@/lib/i18n";
 import type { RecurringTransaction } from "@/types";
@@ -16,6 +17,7 @@ export function RecurringPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<RecurringTransaction | null>(null);
+  const [postingItem, setPostingItem] = useState<RecurringTransaction | null>(null);
 
   function openCreateModal() {
     setEditingItem(null);
@@ -34,7 +36,7 @@ export function RecurringPage() {
   }
 
   function handlePost(item: RecurringTransaction) {
-    postRecurring.mutate(item.id);
+    setPostingItem(item);
   }
 
   return (
@@ -63,6 +65,11 @@ export function RecurringPage() {
       </Card>
 
       <RecurringFormModal open={modalOpen} onClose={() => setModalOpen(false)} recurring={editingItem} />
+      <RecurringPostModal
+        open={postingItem !== null}
+        onClose={() => setPostingItem(null)}
+        recurring={postingItem}
+      />
     </div>
   );
 }

@@ -9,7 +9,7 @@ from datetime import date as date_
 from datetime import timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -163,30 +163,83 @@ async def delete_recurring(session: AsyncSession, recurring_id: int) -> None:
     await session.commit()
 
 
-async def post_recurring(session: AsyncSession, recurring_id: int) -> RecurringTransactionRead:
-    """Creates a real Transaction from the template, dated today, and moves
-    last_posted_date forward — the only thing that advances the schedule.
+async def refresh_last_posted_date(session: AsyncSession, recurring_id: int | None) -> None:
+    """Recomputes last_posted_date from the transactions still linked to the
+    template: the latest of their dates, or None when none are left — which
+    is exactly what makes the template "not paid" again after its last
+    linked transaction is deleted, unlinked or moved to another date.
 
-    Refuses (409) to post twice within the same period, so a double click or
-    a second open tab can't create a duplicate transaction."""
+    Called when a link goes away. Flushes first, because the session runs
+    with autoflush off and the aggregate below must see the pending change.
+    Doesn't commit — the caller owns the transaction."""
+    if recurring_id is None:
+        return
+    await session.flush()
+    recurring = await session.get(RecurringTransaction, recurring_id)
+    if recurring is None:
+        return
+    latest = (
+        await session.execute(
+            select(func.max(Transaction.date)).where(Transaction.recurring_transaction_id == recurring_id)
+        )
+    ).scalar_one()
+    recurring.last_posted_date = latest
+
+
+async def mark_posted_through(session: AsyncSession, recurring_id: int | None, posted_on: date_) -> None:
+    """A transaction was linked to the template: moves last_posted_date
+    forward to its date, never backwards — linking an older transaction
+    mustn't un-pay a period that a newer one already paid. Doesn't commit."""
+    if recurring_id is None:
+        return
+    recurring = await session.get(RecurringTransaction, recurring_id)
+    if recurring is None:
+        return
+    if recurring.last_posted_date is None or posted_on > recurring.last_posted_date:
+        recurring.last_posted_date = posted_on
+
+
+async def post_recurring(
+    session: AsyncSession, recurring_id: int, transaction_id: int | None = None
+) -> RecurringTransactionRead:
+    """Records a payment for the current period, either by creating a new
+    Transaction from the template (transaction_id=None) or by linking an
+    existing one. Both paths move last_posted_date forward — the only thing
+    that advances the schedule — and both refuse (409) a second payment in
+    the same period, so a double click or a second open tab can't create a
+    duplicate."""
     recurring = await _get_or_404(session, recurring_id)
     today = date_.today()
     if _is_paid_in_current_period(recurring, today):
         raise HTTPException(status_code=409, detail="Recurring transaction is already posted for the current period")
 
-    session.add(
-        Transaction(
-            account_id=recurring.account_id,
-            category_id=recurring.category_id,
-            transfer_account_id=recurring.transfer_account_id,
-            type=recurring.type,
-            amount=recurring.amount,
-            description=recurring.description,
-            merchant=recurring.merchant,
-            notes=recurring.notes,
-            date=today,
+    if transaction_id is None:
+        session.add(
+            Transaction(
+                account_id=recurring.account_id,
+                category_id=recurring.category_id,
+                transfer_account_id=recurring.transfer_account_id,
+                type=recurring.type,
+                amount=recurring.amount,
+                description=recurring.description,
+                merchant=recurring.merchant,
+                notes=recurring.notes,
+                date=today,
+                recurring_transaction_id=recurring.id,
+            )
         )
-    )
-    recurring.last_posted_date = today
+        recurring.last_posted_date = today
+    else:
+        transaction = await session.get(Transaction, transaction_id)
+        if transaction is None:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        previous_recurring_id = transaction.recurring_transaction_id
+        transaction.recurring_transaction_id = recurring.id
+        # The transaction may have been linked to another template: that one
+        # loses a payment and has to be recomputed.
+        if previous_recurring_id is not None and previous_recurring_id != recurring.id:
+            await refresh_last_posted_date(session, previous_recurring_id)
+        await mark_posted_through(session, recurring.id, transaction.date)
+
     await session.commit()
     return _to_read(await _get_or_404(session, recurring_id))

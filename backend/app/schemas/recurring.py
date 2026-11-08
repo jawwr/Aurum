@@ -46,6 +46,13 @@ class RecurringTransactionUpdate(BaseModel):
         return capitalize_first_letter(value) if value is not None else None
 
 
+class RecurringPostInput(BaseModel):
+    """Omitted or null -> create a new transaction from the template.
+    Set -> link this existing transaction to the template instead."""
+
+    transaction_id: int | None = None
+
+
 class RecurringTransactionRead(BaseModel):
     id: int
     account_id: int

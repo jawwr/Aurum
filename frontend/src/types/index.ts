@@ -92,6 +92,7 @@ export interface Transaction {
   merchant: string | null;
   notes: string | null;
   date: string;
+  recurring_transaction_id: number | null;
   account: Account;
   category: Category | null;
   tags: Tag[];
@@ -115,6 +116,8 @@ export interface TransactionInput {
   merchant?: string | null;
   notes?: string | null;
   date: string;
+  // Omitted -> unchanged on update; null -> unlinks from the recurring template.
+  recurring_transaction_id?: number | null;
   // Omitted -> tags untouched on update; sent (even as []) -> replaces the
   // full tag set. Always sent on create (defaults to []).
   tag_ids?: number[];

@@ -59,7 +59,8 @@ export function useDeleteRecurring() {
 export function usePostRecurring() {
   const invalidate = useInvalidateRecurring();
   return useMutation({
-    mutationFn: (id: number) => postRecurring(id),
+    mutationFn: ({ id, transactionId }: { id: number; transactionId: number | null }) =>
+      postRecurring(id, transactionId),
     onSuccess: () => invalidate(true),
   });
 }

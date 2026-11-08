@@ -20,6 +20,12 @@ class Transaction(Base, TimestampMixin):
     transfer_account_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
     )
+    # Set when this transaction is a payment of a recurring template (see
+    # services/recurring_service.post_recurring). Many transactions can point
+    # at one template; deleting the template just clears the link.
+    recurring_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("recurring_transactions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     type: Mapped[TransactionType] = mapped_column(
         Enum(TransactionType, name="transaction_type", native_enum=False, length=10), nullable=False
@@ -34,6 +40,12 @@ class Transaction(Base, TimestampMixin):
     account: Mapped["Account"] = relationship(back_populates="transactions", foreign_keys=[account_id])
     transfer_account: Mapped["Account | None"] = relationship(foreign_keys=[transfer_account_id])
     category: Mapped["Category | None"] = relationship(back_populates="transactions")
+    # Declared (never eager-loaded) so the unit of work knows to insert a
+    # recurring template before the transactions that point at it, e.g. when
+    # a backup is restored.
+    recurring_transaction: Mapped["RecurringTransaction | None"] = relationship(
+        foreign_keys=[recurring_transaction_id]
+    )
     tags: Mapped[list["Tag"]] = relationship(secondary=transaction_tags, back_populates="transactions")
     splits: Mapped[list["TransactionSplit"]] = relationship(
         back_populates="transaction", cascade="all, delete-orphan", order_by="TransactionSplit.id"

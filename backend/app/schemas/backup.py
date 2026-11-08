@@ -63,6 +63,9 @@ class TransactionBackup(BaseModel):
     merchant: str | None
     notes: str | None
     date: date_
+    # Defaulted so a backup exported before transactions could be linked to
+    # recurring templates still imports cleanly under the same format version.
+    recurring_transaction_id: int | None = None
     # Defaulted so a backup exported before tags existed still imports
     # cleanly under the same format version. Not a plain column — populated
     # explicitly in build_backup() from the `tags` relationship, since

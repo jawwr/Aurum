@@ -17,6 +17,8 @@ export function deleteRecurring(id: number) {
   return api.delete<void>(`/recurring/${id}`);
 }
 
-export function postRecurring(id: number) {
-  return api.post<RecurringTransaction>(`/recurring/${id}/post`, {});
+/** transactionId null -> creates a new transaction from the template;
+ * otherwise links that existing transaction to it. */
+export function postRecurring(id: number, transactionId: number | null) {
+  return api.post<RecurringTransaction>(`/recurring/${id}/post`, { transaction_id: transactionId });
 }

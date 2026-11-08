@@ -11,6 +11,7 @@ from app.api.deps import get_session
 from app.core.audit import log_destructive
 from app.models.category import Category
 from app.models.enums import CategoryKind, TransactionType
+from app.models.recurring import RecurringTransaction
 from app.models.tag import Tag
 from app.models.transaction import Transaction, TransactionSplit
 from app.schemas.transaction import (
@@ -24,6 +25,7 @@ from app.schemas.transaction import (
     split_rule_violation,
     transfer_rule_violation,
 )
+from app.services.recurring_service import mark_posted_through, refresh_last_posted_date
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -44,6 +46,14 @@ async def _resolve_tags(session: AsyncSession, tag_ids: list[int]) -> list[Tag]:
     if missing:
         raise HTTPException(status_code=400, detail=f"Unknown tag id(s): {sorted(missing)}")
     return tags
+
+
+async def _ensure_recurring_exists(session: AsyncSession, recurring_id: int | None) -> None:
+    if recurring_id is None:
+        return
+    if await session.get(RecurringTransaction, recurring_id) is None:
+        raise HTTPException(status_code=400, detail="Recurring transaction not found")
+
 
 _TYPE_TO_CATEGORY_KIND = {
     TransactionType.INCOME: CategoryKind.INCOME,
@@ -196,12 +206,15 @@ async def list_transaction_years(session: AsyncSession = Depends(get_session)) -
 @router.post("", response_model=TransactionRead, status_code=201)
 async def create_transaction(payload: TransactionCreate, session: AsyncSession = Depends(get_session)) -> Transaction:
     await _ensure_category_matches_type(session, payload.category_id, payload.type)
+    await _ensure_recurring_exists(session, payload.recurring_transaction_id)
     fields = payload.model_dump(exclude={"tag_ids", "splits"})
     transaction = Transaction(**fields)
     transaction.tags = await _resolve_tags(session, payload.tag_ids)
     if payload.splits:
         transaction.splits = await _build_splits(session, payload.splits, payload.type)
     session.add(transaction)
+    # A transaction linked to a template counts as that template's payment.
+    await mark_posted_through(session, payload.recurring_transaction_id, payload.date)
     await session.commit()
     refreshed = await session.execute(
         select(Transaction).options(*_EAGER).where(Transaction.id == transaction.id)
@@ -218,6 +231,7 @@ async def bulk_create_transactions(
     instead of leaving a half-imported statement behind."""
     for item in payload.items:
         await _ensure_category_matches_type(session, item.category_id, item.type)
+        await _ensure_recurring_exists(session, item.recurring_transaction_id)
 
     transactions = []
     for item in payload.items:
@@ -228,6 +242,8 @@ async def bulk_create_transactions(
         transactions.append(transaction)
 
     session.add_all(transactions)
+    for item in payload.items:
+        await mark_posted_through(session, item.recurring_transaction_id, item.date)
     await session.commit()
     # One request can add thousands of rows (CSV import) — worth a line so an
     # unexpected pile of transactions can be dated later.
@@ -258,6 +274,9 @@ async def update_transaction(
     effective_transfer_account_id = updates.get("transfer_account_id", transaction.transfer_account_id)
     effective_amount = updates.get("amount", transaction.amount)
     await _ensure_category_matches_type(session, effective_category_id, effective_type)
+    await _ensure_recurring_exists(
+        session, updates.get("recurring_transaction_id", transaction.recurring_transaction_id)
+    )
     violation = transfer_rule_violation(
         type=effective_type,
         account_id=effective_account_id,
@@ -290,12 +309,25 @@ async def update_transaction(
     if split_violation:
         raise HTTPException(status_code=400, detail=split_violation)
 
+    previous_recurring_id = transaction.recurring_transaction_id
+    previous_date = transaction.date
     for field, value in updates.items():
         setattr(transaction, field, value)
     if payload.tag_ids is not None:
         transaction.tags = await _resolve_tags(session, payload.tag_ids)
     if payload.splits is not None:
         transaction.splits = await _build_splits(session, payload.splits, effective_type)
+
+    # Keep the templates' paid state in step with the link. The template the
+    # transaction left (unlinked, or moved to another template, or still
+    # linked but dated elsewhere) is recomputed from what is still linked to
+    # it; the template it now belongs to is marked paid through its date.
+    new_recurring_id = transaction.recurring_transaction_id
+    link_changed = new_recurring_id != previous_recurring_id
+    if previous_recurring_id is not None and (link_changed or transaction.date != previous_date):
+        await refresh_last_posted_date(session, previous_recurring_id)
+    if new_recurring_id is not None and link_changed:
+        await mark_posted_through(session, new_recurring_id, transaction.date)
     await session.commit()
     refreshed = await session.execute(
         select(Transaction).options(*_EAGER).where(Transaction.id == transaction_id)
@@ -308,5 +340,8 @@ async def delete_transaction(transaction_id: int, session: AsyncSession = Depend
     transaction = await session.get(Transaction, transaction_id)
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    recurring_id = transaction.recurring_transaction_id
     await session.delete(transaction)
+    # With its last linked transaction gone the template is "not paid" again.
+    await refresh_last_posted_date(session, recurring_id)
     await session.commit()
