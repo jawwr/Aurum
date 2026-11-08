@@ -5,12 +5,17 @@ import { Button } from "@/components/ui/Button";
 import { AccountList } from "@/components/accounts/AccountList";
 import { AccountFormModal } from "@/components/accounts/AccountFormModal";
 import { useAccounts, useDeleteAccount, useUpdateAccount } from "@/hooks/useAccounts";
+import { usePageParams } from "@/hooks/usePageParams";
 import { useTranslation } from "@/lib/i18n";
+import { boolParam } from "@/lib/pageParams";
 import type { Account, AccountWithBalance } from "@/types";
+
+// Query params mirror what the accounts request sends; also kept in localStorage.
+const PARAM_SCHEMA = { archived: boolParam(false) };
 
 export function AccountsPage() {
   const { t } = useTranslation();
-  const [showArchived, setShowArchived] = useState(false);
+  const [{ archived: showArchived }, setParams] = usePageParams("accounts", PARAM_SCHEMA);
   const { data: accounts, isLoading } = useAccounts(showArchived);
   const updateAccount = useUpdateAccount();
   const deleteAccount = useDeleteAccount();
@@ -53,7 +58,7 @@ export function AccountsPage() {
             <input
               type="checkbox"
               checked={showArchived}
-              onChange={(event) => setShowArchived(event.target.checked)}
+              onChange={(event) => setParams({ archived: event.target.checked })}
               className="h-3.5 w-3.5 accent-text-primary"
             />
             {t("account.showArchived")}

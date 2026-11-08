@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { FileUp, Plus, Search, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -11,55 +11,55 @@ import { TransactionFormModal } from "@/components/transactions/TransactionFormM
 import { useTransactions, useDeleteTransaction, useTransactionYears } from "@/hooks/useTransactions";
 import { useCategories } from "@/hooks/useCategories";
 import { useTags } from "@/hooks/useTags";
-import type { TransactionSort } from "@/api/transactions";
+import { TRANSACTION_SORTS, type TransactionSort } from "@/api/transactions";
+import { usePageParams } from "@/hooks/usePageParams";
 import { useTranslation } from "@/lib/i18n";
 import { buildHierarchicalCategories, translateCategoryName } from "@/lib/categoryLabels";
+import { enumParam, monthParam, optionalIntParam, pageParam, stringParam, yearParam } from "@/lib/pageParams";
 import type { Transaction, TransactionType } from "@/types";
 
 const PAGE_SIZE = 20;
 
-/** Parses a query-param month, falling back to `fallback` for anything
- * missing or out of range (e.g. a hand-edited URL). Must check `value`
- * for null before `Number()` — `Number(null)` is 0, not NaN, so a missing
- * param would otherwise silently pass the integer check and clamp to 1. */
-function parseMonthParam(value: string | null, fallback: number): number {
-  if (value === null) return fallback;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 12 ? parsed : fallback;
-}
+const TRANSACTION_TYPES: ReadonlyArray<TransactionType | ""> = ["", "expense", "income", "transfer"];
 
-function parseYearParam(value: string | null, fallback: number): number {
-  if (value === null) return fallback;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
+// Query params mirror what the transactions request sends; also kept in
+// localStorage. The Dashboard's "All transactions" link deep-links here with
+// just ?year=&month= — the URL wins, everything else falls back to defaults.
+const PARAM_SCHEMA = {
+  year: yearParam(),
+  month: monthParam(),
+  type: enumParam<TransactionType | "">(TRANSACTION_TYPES, ""),
+  category: optionalIntParam(),
+  tag: optionalIntParam(),
+  sort: enumParam<TransactionSort>(TRANSACTION_SORTS, "date_desc"),
+  page: pageParam(),
+  search: stringParam(),
+};
 
 export function TransactionsPage() {
   const { t, language } = useTranslation();
   const now = new Date();
-  // Deep-linked from the Dashboard's "All transactions" link, which carries
-  // the month/year the user was already looking at (?year=&month=) so this
-  // page doesn't reset back to the current month.
-  const [searchParams] = useSearchParams();
-  const [year, setYear] = useState(() => parseYearParam(searchParams.get("year"), now.getFullYear()));
-  const [month, setMonth] = useState(() => parseMonthParam(searchParams.get("month"), now.getMonth() + 1));
-  const [type, setType] = useState<TransactionType | "">("");
-  const [categoryId, setCategoryId] = useState<string>("");
-  const [tagId, setTagId] = useState<string>("");
-  const [sort, setSort] = useState<TransactionSort>("date_desc");
-  const [page, setPage] = useState(1);
+  const [{ year, month, type, category, tag, sort, page, search }, setParams] = usePageParams(
+    "transactions",
+    PARAM_SCHEMA
+  );
+  const categoryId = category ?? "";
+  const tagId = tag ?? "";
 
-  // Raw text follows every keystroke; the debounced value is what actually
-  // drives the query, so we're not refetching on every character typed.
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  // Raw text follows every keystroke; the debounced value (the `search`
+  // query param) is what actually drives the query, so we're not refetching
+  // on every character typed. Starts from the param so a restored/deep-linked
+  // search shows up in the box.
+  const [searchInput, setSearchInput] = useState(search);
   useEffect(() => {
     const timeout = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
+      const trimmed = searchInput.trim();
+      // Functional patch: no-op when nothing changed, so mounting with a
+      // restored search doesn't reset the restored page back to 1.
+      setParams((prev) => (prev.search === trimmed ? {} : { search: trimmed, page: 1 }));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [searchInput]);
+  }, [searchInput, setParams]);
   const isSearching = search.length > 0;
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -75,8 +75,8 @@ export function TransactionsPage() {
     month: isSearching ? undefined : month,
     search: isSearching ? search : undefined,
     type: type || undefined,
-    category_id: categoryId ? Number(categoryId) : undefined,
-    tag_id: tagId ? Number(tagId) : undefined,
+    category_id: category ?? undefined,
+    tag_id: tag ?? undefined,
     sort,
     page,
     page_size: PAGE_SIZE,
@@ -117,11 +117,8 @@ export function TransactionsPage() {
    * browsing view with it in context instead of a flat result list. */
   function handleJumpToMonth(transaction: Transaction) {
     const date = new Date(`${transaction.date}T00:00:00`);
-    setYear(date.getFullYear());
-    setMonth(date.getMonth() + 1);
     setSearchInput("");
-    setSearch("");
-    setPage(1);
+    setParams({ year: date.getFullYear(), month: date.getMonth() + 1, search: "", page: 1 });
   }
 
   return (
@@ -131,20 +128,14 @@ export function TransactionsPage() {
           <div className={`min-w-0 flex-1 ${isSearching ? "pointer-events-none opacity-50" : ""}`}>
             <MonthSelector
               month={month}
-              onChange={(value) => {
-                setMonth(value);
-                setPage(1);
-              }}
+              onChange={(value) => setParams({ month: value, page: 1 })}
             />
           </div>
           <div className={isSearching ? "pointer-events-none opacity-50" : ""}>
             <YearSelector
               years={years ?? [now.getFullYear()]}
               year={year}
-              onChange={(value) => {
-                setYear(value);
-                setPage(1);
-              }}
+              onChange={(value) => setParams({ year: value, page: 1 })}
             />
           </div>
         </div>
@@ -176,8 +167,7 @@ export function TransactionsPage() {
             aria-label={t("common.clear")}
             onClick={() => {
               setSearchInput("");
-              setSearch("");
-              setPage(1);
+              setParams({ search: "", page: 1 });
             }}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-text-muted hover:bg-surface-2 hover:text-text-primary"
           >
@@ -190,10 +180,7 @@ export function TransactionsPage() {
       <div className="flex flex-col gap-3 sm:flex-row">
         <Select
           value={type}
-          onChange={(event) => {
-            setType(event.target.value as TransactionType | "");
-            setPage(1);
-          }}
+          onChange={(event) => setParams({ type: event.target.value as TransactionType | "", page: 1 })}
           className="sm:w-48"
         >
           <option value="">{t("transactions.allTypes")}</option>
@@ -203,10 +190,9 @@ export function TransactionsPage() {
         </Select>
         <Select
           value={categoryId}
-          onChange={(event) => {
-            setCategoryId(event.target.value);
-            setPage(1);
-          }}
+          onChange={(event) =>
+            setParams({ category: event.target.value ? Number(event.target.value) : null, page: 1 })
+          }
           className="sm:w-56"
         >
           <option value="">{t("transactions.allCategories")}</option>
@@ -234,10 +220,7 @@ export function TransactionsPage() {
         {tags && tags.length > 0 && (
           <Select
             value={tagId}
-            onChange={(event) => {
-              setTagId(event.target.value);
-              setPage(1);
-            }}
+            onChange={(event) => setParams({ tag: event.target.value ? Number(event.target.value) : null, page: 1 })}
             className="sm:w-48"
           >
             <option value="">{t("transactions.allTags")}</option>
@@ -250,10 +233,7 @@ export function TransactionsPage() {
         )}
         <Select
           value={sort}
-          onChange={(event) => {
-            setSort(event.target.value as TransactionSort);
-            setPage(1);
-          }}
+          onChange={(event) => setParams({ sort: event.target.value as TransactionSort, page: 1 })}
           className="sm:w-56"
         >
           <option value="date_desc">{t("transactions.sortDateDesc")}</option>
@@ -282,11 +262,11 @@ export function TransactionsPage() {
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-center gap-3 text-sm">
-              <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <Button variant="secondary" disabled={page <= 1} onClick={() => setParams({ page: page - 1 })}>
                 {t("common.back")}
               </Button>
               <span className="text-text-muted">{t("common.pageOf", { page, total: totalPages })}</span>
-              <Button variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              <Button variant="secondary" disabled={page >= totalPages} onClick={() => setParams({ page: page + 1 })}>
                 {t("common.next")}
               </Button>
             </div>

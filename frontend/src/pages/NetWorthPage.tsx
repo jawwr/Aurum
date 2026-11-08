@@ -11,15 +11,22 @@ import { AssetFormModal } from "@/components/networth/AssetFormModal";
 import { AlertBanner } from "@/components/insights/AlertBanner";
 import { useNetWorthSummary } from "@/hooks/useNetWorth";
 import { useAssets, useDeleteAsset } from "@/hooks/useAssets";
+import { usePageParams } from "@/hooks/usePageParams";
 import { useTranslation } from "@/lib/i18n";
+import { enumParam } from "@/lib/pageParams";
 import type { Asset, NetWorthRange } from "@/types";
+
+const NET_WORTH_RANGES: readonly NetWorthRange[] = ["30d", "90d", "1y", "5y", "all"];
+
+// Defaults to 5 years: a short window can show a dip whenever spending
+// briefly outpaces recorded income, which reads as decline even though
+// the long-run trend is up — 5y is long enough to make that trend visible.
+// Query params mirror what the summary request sends; also kept in localStorage.
+const PARAM_SCHEMA = { range: enumParam<NetWorthRange>(NET_WORTH_RANGES, "5y") };
 
 export function NetWorthPage() {
   const { t } = useTranslation();
-  // Defaults to 5 years: a short window can show a dip whenever spending
-  // briefly outpaces recorded income, which reads as decline even though
-  // the long-run trend is up — 5y is long enough to make that trend visible.
-  const [range, setRange] = useState<NetWorthRange>("5y");
+  const [{ range }, setParams] = usePageParams("net-worth", PARAM_SCHEMA);
   const { data: summary, isLoading: isSummaryLoading } = useNetWorthSummary(range);
   const { data: assets, isLoading: isAssetsLoading } = useAssets();
   const deleteAsset = useDeleteAsset();
@@ -47,7 +54,7 @@ export function NetWorthPage() {
     <div className="space-y-5">
       <AlertBanner />
 
-      <NetWorthChart summary={summary} isLoading={isSummaryLoading} range={range} onRangeChange={setRange} />
+      <NetWorthChart summary={summary} isLoading={isSummaryLoading} range={range} onRangeChange={(value) => setParams({ range: value })} />
 
       <AssetAllocationCard breakdown={summary?.breakdown ?? []} isLoading={isSummaryLoading} />
 

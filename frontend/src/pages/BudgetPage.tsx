@@ -8,16 +8,20 @@ import { AlertBanner } from "@/components/insights/AlertBanner";
 import { BudgetList } from "@/components/budget/BudgetList";
 import { BudgetFormModal } from "@/components/budget/BudgetFormModal";
 import { useBudgets, useBudgetStatus, useDeleteBudget } from "@/hooks/useBudgets";
+import { usePageParams } from "@/hooks/usePageParams";
 import { useTransactionYears } from "@/hooks/useTransactions";
 import { useTranslation } from "@/lib/i18n";
 import { translateCategoryName } from "@/lib/categoryLabels";
+import { monthParam, yearParam } from "@/lib/pageParams";
 import type { Budget, BudgetStatus } from "@/types";
+
+// Query params mirror what the budget-status request sends; also kept in localStorage.
+const PARAM_SCHEMA = { year: yearParam(), month: monthParam() };
 
 export function BudgetPage() {
   const { t } = useTranslation();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [{ year, month }, setParams] = usePageParams("budget", PARAM_SCHEMA);
   const { data: years } = useTransactionYears();
 
   const { data: budgets } = useBudgets();
@@ -56,9 +60,9 @@ export function BudgetPage() {
 
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <MonthSelector month={month} onChange={setMonth} />
+          <MonthSelector month={month} onChange={(value) => setParams({ month: value })} />
         </div>
-        <YearSelector years={years ?? [now.getFullYear()]} year={year} onChange={setYear} />
+        <YearSelector years={years ?? [now.getFullYear()]} year={year} onChange={(value) => setParams({ year: value })} />
       </div>
 
       <Card>

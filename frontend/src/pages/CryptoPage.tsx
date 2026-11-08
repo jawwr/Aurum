@@ -21,8 +21,18 @@ import {
   useUpdateCryptoHoldingRisk,
 } from "@/hooks/useCrypto";
 import { getIntlLocale } from "@/lib/format";
+import { usePageParams } from "@/hooks/usePageParams";
 import { useTranslation } from "@/lib/i18n";
+import { enumParam, optionalIntParam } from "@/lib/pageParams";
 import type { CryptoHolding, CryptoPortfolio, CryptoRange, CryptoTransaction, RiskLevel } from "@/types";
+
+const CRYPTO_RANGES: readonly CryptoRange[] = ["7d", "30d", "90d", "all"];
+
+// "all" by default — a 30-day window makes a portfolio that's actually
+// grown steadily for years look demotivating whenever it's mid-dip.
+// portfolio: absent = the "All portfolios" tab.
+// Query params mirror what the crypto requests send; also kept in localStorage.
+const PARAM_SCHEMA = { range: enumParam<CryptoRange>(CRYPTO_RANGES, "all"), portfolio: optionalIntParam() };
 
 function formatSyncedAt(iso: string): string {
   return new Intl.DateTimeFormat(getIntlLocale(), { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
@@ -30,16 +40,15 @@ function formatSyncedAt(iso: string): string {
 
 export function CryptoPage() {
   const { t } = useTranslation();
-  // "all" by default — a 30-day window makes a portfolio that's actually
-  // grown steadily for years look demotivating whenever it's mid-dip.
-  const [range, setRange] = useState<CryptoRange>("all");
+  const [{ range, portfolio: portfolioFilter }, setParams] = usePageParams("crypto", PARAM_SCHEMA);
+  const setRange = (value: CryptoRange) => setParams({ range: value });
+  // null = "All portfolios" tab.
+  const setPortfolioFilter = (value: number | null) => setParams({ portfolio: value });
   // Single "hide balance" switch for the whole tab — owned here so every
   // money-displaying section (chart, stats, allocation, table, trade
   // history) masks together instead of the toggle only affecting whichever
   // component happened to own it.
   const [hidden, setHidden] = useState(false);
-  // null = "All portfolios" tab.
-  const [portfolioFilter, setPortfolioFilter] = useState<number | null>(null);
   const { data: portfolios } = useCryptoPortfolios();
   const { data, isLoading } = useCryptoHoldings(portfolioFilter);
   const { data: history, isLoading: isHistoryLoading } = useCryptoHistory(range, portfolioFilter);
