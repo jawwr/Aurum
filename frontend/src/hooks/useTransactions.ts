@@ -15,6 +15,9 @@ function useInvalidateAfterTransactionChange() {
   const queryClient = useQueryClient();
   return () => {
     queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    // Linking, unlinking or deleting a linked transaction changes whether
+    // its recurring payment counts as paid.
+    queryClient.invalidateQueries({ queryKey: ["recurring"] });
     // Without this, a second CSV import of the same date range within
     // staleTime (see main.tsx) would check for duplicates against a cached
     // list from *before* the first import finished — and find none, which

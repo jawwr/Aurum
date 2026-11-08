@@ -88,6 +88,8 @@ class TransactionFields(BaseModel):
     merchant: str | None = Field(default=None, max_length=150)
     notes: str | None = Field(default=None, max_length=2000)
     date: date_
+    # Optional link to a recurring template (many transactions -> one template).
+    recurring_transaction_id: int | None = None
 
     # Auto-capitalizes "траты на продукты" -> "Траты на продукты" so mixed
     # casing from quick manual entry doesn't need fixing by hand later.
@@ -154,6 +156,8 @@ class TransactionUpdate(BaseModel):
     merchant: str | None = Field(default=None, max_length=150)
     notes: str | None = Field(default=None, max_length=2000)
     date: date_ | None = None
+    # Omitted -> link untouched; null -> unlinks from the recurring template.
+    recurring_transaction_id: int | None = None
     # Omitted -> tags untouched; sent (even as []) -> replaces the full tag set.
     tag_ids: list[int] | None = None
     # Omitted -> splits untouched; sent (even as []) -> replaces the full

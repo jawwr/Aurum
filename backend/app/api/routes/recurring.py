@@ -2,7 +2,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.schemas.recurring import RecurringTransactionCreate, RecurringTransactionRead, RecurringTransactionUpdate
+from app.schemas.recurring import (
+    RecurringPostInput,
+    RecurringTransactionCreate,
+    RecurringTransactionRead,
+    RecurringTransactionUpdate,
+)
 from app.services.recurring_service import (
     create_recurring,
     delete_recurring,
@@ -40,6 +45,8 @@ async def delete_recurring_route(recurring_id: int, session: AsyncSession = Depe
 
 @router.post("/{recurring_id}/post", response_model=RecurringTransactionRead, status_code=201)
 async def post_recurring_route(
-    recurring_id: int, session: AsyncSession = Depends(get_session)
+    recurring_id: int,
+    payload: RecurringPostInput | None = None,
+    session: AsyncSession = Depends(get_session),
 ) -> RecurringTransactionRead:
-    return await post_recurring(session, recurring_id)
+    return await post_recurring(session, recurring_id, payload.transaction_id if payload else None)

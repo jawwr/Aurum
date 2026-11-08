@@ -101,6 +101,7 @@ def _validate_references(payload: BackupPayload) -> None:
     category_ids = {row.id for row in payload.categories}
     asset_ids = {row.id for row in payload.assets}
     tag_ids = {row.id for row in payload.tags}
+    recurring_ids = {row.id for row in payload.recurring_transactions}
 
     for c in payload.categories:
         if c.parent_id is not None and c.parent_id not in category_ids:
@@ -115,6 +116,10 @@ def _validate_references(payload: BackupPayload) -> None:
             )
         if t.category_id is not None and t.category_id not in category_ids:
             raise HTTPException(400, f"Transaction {t.id} references unknown category_id {t.category_id}")
+        if t.recurring_transaction_id is not None and t.recurring_transaction_id not in recurring_ids:
+            raise HTTPException(
+                400, f"Transaction {t.id} references unknown recurring_transaction_id {t.recurring_transaction_id}"
+            )
         for tag_id in t.tag_ids:
             if tag_id not in tag_ids:
                 raise HTTPException(400, f"Transaction {t.id} references unknown tag_id {tag_id}")
