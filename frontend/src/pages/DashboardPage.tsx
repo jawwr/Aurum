@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { MonthSelector } from "@/components/layout/MonthSelector";
 import { YearSelector } from "@/components/layout/YearSelector";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -6,9 +5,14 @@ import { SpendingByCategoryCard } from "@/components/dashboard/SpendingByCategor
 import { RecentTransactionsCard } from "@/components/dashboard/RecentTransactionsCard";
 import { AlertBanner } from "@/components/insights/AlertBanner";
 import { useDashboardSummary } from "@/hooks/useDashboard";
+import { usePageParams } from "@/hooks/usePageParams";
 import { useTransactionYears } from "@/hooks/useTransactions";
 import { formatCurrency, formatSignedCurrency } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
+import { monthParam, yearParam } from "@/lib/pageParams";
+
+// Query params mirror what the summary request sends; also kept in localStorage.
+const PARAM_SCHEMA = { year: yearParam(), month: monthParam() };
 
 /** Share of income left over after spending (net / real_income). `null` when
  * there was no income to take a share of, rather than a misleading 0%. */
@@ -24,8 +28,7 @@ function formatPercent(value: number): string {
 export function DashboardPage() {
   const { t } = useTranslation();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [{ year, month }, setParams] = usePageParams("dashboard", PARAM_SCHEMA);
   const { data: years } = useTransactionYears();
 
   const { data, isLoading, isError } = useDashboardSummary(year, month);
@@ -37,9 +40,9 @@ export function DashboardPage() {
 
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <MonthSelector month={month} onChange={setMonth} />
+          <MonthSelector month={month} onChange={(value) => setParams({ month: value })} />
         </div>
-        <YearSelector years={years ?? [now.getFullYear()]} year={year} onChange={setYear} />
+        <YearSelector years={years ?? [now.getFullYear()]} year={year} onChange={(value) => setParams({ year: value })} />
       </div>
 
       {isError && (

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { usePageParams } from "@/hooks/usePageParams";
+import { enumParam, optionalIntParam, pageParam, rangePresetParam, yearParam } from "@/lib/pageParams";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Label, Select } from "@/components/ui/Input";
@@ -11,13 +13,25 @@ import { TransactionFormModal } from "@/components/transactions/TransactionFormM
 import { useCategories } from "@/hooks/useCategories";
 import { useCategoryRanking, useCategorySpendingReport } from "@/hooks/useReports";
 import { useDeleteTransaction, useTransactions, useTransactionYears } from "@/hooks/useTransactions";
-import type { TransactionSort } from "@/api/transactions";
+import { TRANSACTION_SORTS, type TransactionSort } from "@/api/transactions";
 import { computeRange, type CustomYearRange, type RangePreset } from "@/lib/dateRange";
 import { useTranslation } from "@/lib/i18n";
 import { buildHierarchicalCategories, translateCategoryName } from "@/lib/categoryLabels";
 import type { Transaction } from "@/types";
 
 const PAGE_SIZE = 20;
+
+// Query params mirror what the report/ranking/transactions requests send;
+// also kept in localStorage. category: absent until the first expense
+// category is picked by the effect below.
+const PARAM_SCHEMA = {
+  category: optionalIntParam(),
+  range: rangePresetParam("all"),
+  from: yearParam(),
+  to: yearParam(),
+  sort: enumParam<TransactionSort>(TRANSACTION_SORTS, "date_desc"),
+  page: pageParam(),
+};
 
 export function ReportsPage() {
   const { t, language } = useTranslation();
@@ -30,23 +44,17 @@ export function ReportsPage() {
   ];
   const { data: categories } = useCategories();
   const { data: years } = useTransactionYears();
-  const [categoryId, setCategoryId] = useState<number | null>(null);
-  const [range, setRange] = useState<RangePreset>("all");
-  const [customRange, setCustomRange] = useState<CustomYearRange>({
-    fromYear: now.getFullYear(),
-    toYear: now.getFullYear(),
-  });
-  const [sort, setSort] = useState<TransactionSort>("date_desc");
-  const [page, setPage] = useState(1);
+  const [{ category: categoryId, range, from, to, sort, page }, setParams] = usePageParams("reports", PARAM_SCHEMA);
+  const customRange: CustomYearRange = { fromYear: from, toYear: to };
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     if (categoryId === null && categories && categories.length > 0) {
       const firstExpense = categories.find((category) => category.kind === "expense");
-      setCategoryId((firstExpense ?? categories[0]).id);
+      setParams({ category: (firstExpense ?? categories[0]).id });
     }
-  }, [categories, categoryId]);
+  }, [categories, categoryId, setParams]);
 
   const { startDate, endDate } = computeRange(range, customRange);
   const { data: ranking, isLoading: isRankingLoading } = useCategoryRanking("expense", startDate, endDate);
@@ -94,8 +102,7 @@ export function ReportsPage() {
             id="report-category"
             value={categoryId ?? ""}
             onChange={(event) => {
-              setCategoryId(Number(event.target.value));
-              setPage(1);
+              setParams({ category: Number(event.target.value), page: 1 });
             }}
           >
             {expenseCategories.length > 0 && (
@@ -124,20 +131,14 @@ export function ReportsPage() {
           <PillSelector
             options={RANGE_OPTIONS}
             value={range}
-            onChange={(value) => {
-              setRange(value);
-              setPage(1);
-            }}
+            onChange={(value) => setParams({ range: value, page: 1 })}
           />
           {range === "custom" && (
             <YearRangeSelector
               years={years ?? [now.getFullYear()]}
               fromYear={customRange.fromYear}
               toYear={customRange.toYear}
-              onChange={(value) => {
-                setCustomRange(value);
-                setPage(1);
-              }}
+              onChange={(value) => setParams({ from: value.fromYear, to: value.toYear, page: 1 })}
             />
           )}
         </div>
@@ -149,10 +150,7 @@ export function ReportsPage() {
         items={ranking?.items ?? []}
         isLoading={isRankingLoading}
         selectedCategoryId={categoryId}
-        onSelectCategory={(id) => {
-          setCategoryId(id);
-          setPage(1);
-        }}
+        onSelectCategory={(id) => setParams({ category: id, page: 1 })}
       />
 
       <Card>
@@ -165,10 +163,7 @@ export function ReportsPage() {
         <CardContent>
           <Select
             value={sort}
-            onChange={(event) => {
-              setSort(event.target.value as TransactionSort);
-              setPage(1);
-            }}
+            onChange={(event) => setParams({ sort: event.target.value as TransactionSort, page: 1 })}
             className="mb-3 sm:w-56"
           >
             <option value="date_desc">{t("transactions.sortDateDesc")}</option>
@@ -183,11 +178,11 @@ export function ReportsPage() {
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-center gap-3 text-sm">
-              <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <Button variant="secondary" disabled={page <= 1} onClick={() => setParams({ page: page - 1 })}>
                 {t("common.back")}
               </Button>
               <span className="text-text-muted">{t("common.pageOf", { page, total: totalPages })}</span>
-              <Button variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              <Button variant="secondary" disabled={page >= totalPages} onClick={() => setParams({ page: page + 1 })}>
                 {t("common.next")}
               </Button>
             </div>
