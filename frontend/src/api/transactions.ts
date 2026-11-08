@@ -3,6 +3,8 @@ import type { Transaction, TransactionInput, TransactionPage } from "@/types";
 
 export type TransactionSort = "date_desc" | "amount_desc" | "amount_asc";
 
+export const TRANSACTION_SORTS: readonly TransactionSort[] = ["date_desc", "amount_desc", "amount_asc"];
+
 export interface TransactionFilters {
   year?: number;
   month?: number;

@@ -2,6 +2,8 @@
  * period presets over their respective date-ranged endpoints. */
 export type RangePreset = "all" | "this_year" | "5y" | "custom";
 
+export const RANGE_PRESETS: readonly RangePreset[] = ["all", "this_year", "5y", "custom"];
+
 export interface CustomYearRange {
   fromYear: number;
   toYear: number;
