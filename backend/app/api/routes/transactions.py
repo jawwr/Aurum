@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +21,7 @@ from app.schemas.transaction import (
     TransactionPage,
     TransactionRead,
     TransactionSplitInput,
+    TransactionTotal,
     TransactionUpdate,
     split_rule_violation,
     transfer_rule_violation,
@@ -110,6 +111,63 @@ async def _build_splits(
     return [TransactionSplit(category_id=s.category_id, amount=s.amount, note=s.note) for s in splits]
 
 
+def _apply_transaction_filters(
+    stmt,
+    *,
+    year: int | None,
+    month: int | None,
+    start_date: date_ | None,
+    end_date: date_ | None,
+    account_id: int | None,
+    category_id: int | None,
+    tag_id: int | None,
+    type: TransactionType | None,
+    search: str | None,
+):
+    """The where-clauses shared by the list and total endpoints — kept here so
+    the two can never drift apart (a filter the list honors but the total
+    forgets would silently make the big number disagree with the table
+    below it). Returns the statement for chaining."""
+    if year is not None:
+        stmt = stmt.where(func.extract("year", Transaction.date) == year)
+    if month is not None:
+        stmt = stmt.where(func.extract("month", Transaction.date) == month)
+    if start_date is not None:
+        stmt = stmt.where(Transaction.date >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(Transaction.date <= end_date)
+    if account_id is not None:
+        stmt = stmt.where(Transaction.account_id == account_id)
+    if category_id is not None:
+        # A split transaction has category_id=NULL on the row itself — the
+        # category lives on its split lines instead, so filtering by exact
+        # column match alone would silently drop it from a category filter
+        # it genuinely belongs to.
+        stmt = stmt.where(
+            or_(
+                Transaction.category_id == category_id,
+                Transaction.splits.any(TransactionSplit.category_id == category_id),
+            )
+        )
+    if tag_id is not None:
+        stmt = stmt.where(Transaction.tags.any(Tag.id == tag_id))
+    if type is not None:
+        stmt = stmt.where(Transaction.type == type)
+    if search is not None:
+        # Lets the user find a transaction from any period by keyword (e.g. an
+        # item bought months ago) without knowing which month to look in first —
+        # matches description, merchant, and notes so any of those fields can surface it.
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Transaction.description.ilike(pattern),
+                Transaction.merchant.ilike(pattern),
+                Transaction.notes.ilike(pattern),
+            )
+        )
+    return stmt
+
+
 @router.get("", response_model=TransactionPage)
 async def list_transactions(
     year: int | None = Query(default=None, ge=2000, le=2100),
@@ -129,49 +187,19 @@ async def list_transactions(
     stmt = select(Transaction).options(*_EAGER)
     count_stmt = select(func.count()).select_from(Transaction)
 
-    if year is not None:
-        stmt = stmt.where(func.extract("year", Transaction.date) == year)
-        count_stmt = count_stmt.where(func.extract("year", Transaction.date) == year)
-    if month is not None:
-        stmt = stmt.where(func.extract("month", Transaction.date) == month)
-        count_stmt = count_stmt.where(func.extract("month", Transaction.date) == month)
-    if start_date is not None:
-        stmt = stmt.where(Transaction.date >= start_date)
-        count_stmt = count_stmt.where(Transaction.date >= start_date)
-    if end_date is not None:
-        stmt = stmt.where(Transaction.date <= end_date)
-        count_stmt = count_stmt.where(Transaction.date <= end_date)
-    if account_id is not None:
-        stmt = stmt.where(Transaction.account_id == account_id)
-        count_stmt = count_stmt.where(Transaction.account_id == account_id)
-    if category_id is not None:
-        # A split transaction has category_id=NULL on the row itself — the
-        # category lives on its split lines instead, so filtering by exact
-        # column match alone would silently drop it from a category filter
-        # it genuinely belongs to.
-        category_filter = or_(
-            Transaction.category_id == category_id, Transaction.splits.any(TransactionSplit.category_id == category_id)
-        )
-        stmt = stmt.where(category_filter)
-        count_stmt = count_stmt.where(category_filter)
-    if tag_id is not None:
-        stmt = stmt.where(Transaction.tags.any(Tag.id == tag_id))
-        count_stmt = count_stmt.where(Transaction.tags.any(Tag.id == tag_id))
-    if type is not None:
-        stmt = stmt.where(Transaction.type == type)
-        count_stmt = count_stmt.where(Transaction.type == type)
-    if search is not None:
-        # Lets the user find a transaction from any period by keyword (e.g. an
-        # item bought months ago) without knowing which month to look in first —
-        # matches description, merchant, and notes so any of those fields can surface it.
-        pattern = f"%{search.strip()}%"
-        search_clause = or_(
-            Transaction.description.ilike(pattern),
-            Transaction.merchant.ilike(pattern),
-            Transaction.notes.ilike(pattern),
-        )
-        stmt = stmt.where(search_clause)
-        count_stmt = count_stmt.where(search_clause)
+    filter_kwargs = dict(
+        year=year,
+        month=month,
+        start_date=start_date,
+        end_date=end_date,
+        account_id=account_id,
+        category_id=category_id,
+        tag_id=tag_id,
+        type=type,
+        search=search,
+    )
+    stmt = _apply_transaction_filters(stmt, **filter_kwargs)
+    count_stmt = _apply_transaction_filters(count_stmt, **filter_kwargs)
 
     total = (await session.execute(count_stmt)).scalar_one()
 
@@ -201,6 +229,49 @@ async def list_transaction_years(session: AsyncSession = Depends(get_session)) -
     if min_date is None:
         return [current_year]
     return list(range(min_date.year, max(max_date.year, current_year) + 1))
+
+
+@router.get("/total", response_model=TransactionTotal)
+async def total_transactions(
+    year: int | None = Query(default=None, ge=2000, le=2100),
+    month: int | None = Query(default=None, ge=1, le=12),
+    start_date: date_ | None = Query(default=None),
+    end_date: date_ | None = Query(default=None),
+    account_id: int | None = None,
+    category_id: int | None = None,
+    tag_id: int | None = None,
+    type: TransactionType | None = None,
+    search: str | None = Query(default=None, min_length=1, max_length=255),
+    session: AsyncSession = Depends(get_session),
+) -> TransactionTotal:
+    """Net sum of every transaction matching the same filters the list
+    endpoint takes, minus pagination/sort (those don't change the total —
+    fetching it again on every page flip would be wasted work). Computed in
+    the database with SUM(CASE ...): income adds +amount, expense subtracts
+    -amount, transfer contributes 0 (a transfer moves money between accounts
+    and doesn't change net worth). Returns a number so the frontend can
+    branch on its sign for the red/green/grey coloring."""
+    # CASE WHEN type = income THEN amount WHEN type = expense THEN -amount ELSE 0
+    signed_amount = case(
+        (Transaction.type == TransactionType.INCOME, Transaction.amount),
+        (Transaction.type == TransactionType.EXPENSE, -Transaction.amount),
+        else_=0,
+    )
+    stmt = select(func.coalesce(func.sum(signed_amount), 0))
+    stmt = _apply_transaction_filters(
+        stmt,
+        year=year,
+        month=month,
+        start_date=start_date,
+        end_date=end_date,
+        account_id=account_id,
+        category_id=category_id,
+        tag_id=tag_id,
+        type=type,
+        search=search,
+    )
+    total = (await session.execute(stmt)).scalar_one()
+    return TransactionTotal(total=float(total))
 
 
 @router.post("", response_model=TransactionRead, status_code=201)
