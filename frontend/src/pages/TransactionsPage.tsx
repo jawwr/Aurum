@@ -8,12 +8,13 @@ import { MonthSelector } from "@/components/layout/MonthSelector";
 import { YearSelector } from "@/components/layout/YearSelector";
 import { TransactionsTable } from "@/components/transactions/TransactionsTable";
 import { TransactionFormModal } from "@/components/transactions/TransactionFormModal";
-import { useTransactions, useDeleteTransaction, useTransactionYears } from "@/hooks/useTransactions";
+import { useTransactions, useDeleteTransaction, useTransactionYears, useTransactionsTotal } from "@/hooks/useTransactions";
 import { useCategories } from "@/hooks/useCategories";
 import { useTags } from "@/hooks/useTags";
 import { TRANSACTION_SORTS, type TransactionSort } from "@/api/transactions";
 import { usePageParams } from "@/hooks/usePageParams";
 import { useTranslation } from "@/lib/i18n";
+import { formatSignedCurrency } from "@/lib/format";
 import { buildHierarchicalCategories, translateCategoryName } from "@/lib/categoryLabels";
 import { enumParam, monthParam, optionalIntParam, pageParam, stringParam, yearParam } from "@/lib/pageParams";
 import type { Transaction, TransactionType } from "@/types";
@@ -81,6 +82,19 @@ export function TransactionsPage() {
     page,
     page_size: PAGE_SIZE,
   });
+  // Same filter shape as the list, minus page/sort — the net total doesn't
+  // change when you flip pages or reorder, so this refetches only on the
+  // period/type/category/tag/search filters actually moving.
+  const { data: totalData, isLoading: totalIsLoading } = useTransactionsTotal({
+    year: isSearching ? undefined : year,
+    month: isSearching ? undefined : month,
+    search: isSearching ? search : undefined,
+    type: type || undefined,
+    category_id: category ?? undefined,
+    tag_id: tag ?? undefined,
+  });
+  const total = totalData?.total ?? 0;
+  const totalColor = total > 0 ? "text-success" : total < 0 ? "text-danger" : "text-text-muted";
   const deleteTransaction = useDeleteTransaction();
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
@@ -177,17 +191,18 @@ export function TransactionsPage() {
       </div>
       {isSearching && <p className="text-xs text-text-muted">{t("transactions.searchAcrossAllTime")}</p>}
 
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <Select
-          value={type}
-          onChange={(event) => setParams({ type: event.target.value as TransactionType | "", page: 1 })}
-          className="sm:w-48"
-        >
-          <option value="">{t("transactions.allTypes")}</option>
-          <option value="expense">{t("transactions.expense")}</option>
-          <option value="income">{t("transactions.income")}</option>
-          <option value="transfer">{t("transactions.transfer")}</option>
-        </Select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Select
+            value={type}
+            onChange={(event) => setParams({ type: event.target.value as TransactionType | "", page: 1 })}
+            className="sm:w-48"
+          >
+            <option value="">{t("transactions.allTypes")}</option>
+            <option value="expense">{t("transactions.expense")}</option>
+            <option value="income">{t("transactions.income")}</option>
+            <option value="transfer">{t("transactions.transfer")}</option>
+          </Select>
         <Select
           value={categoryId}
           onChange={(event) =>
@@ -240,6 +255,16 @@ export function TransactionsPage() {
           <option value="amount_desc">{t("transactions.sortAmountDesc")}</option>
           <option value="amount_asc">{t("transactions.sortAmountAsc")}</option>
         </Select>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-text-muted">{t("transactions.totalLabel")}</div>
+          <div
+            className={`text-3xl font-semibold tabular-nums leading-tight ${totalColor}`}
+            title={t("transactions.totalLabel")}
+          >
+            {totalIsLoading ? "…" : formatSignedCurrency(total)}
+          </div>
+        </div>
       </div>
 
       <Card>

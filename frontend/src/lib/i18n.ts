@@ -287,6 +287,7 @@ const ru = {
   "transactions.sortDateDesc": "Сначала новые",
   "transactions.sortAmountDesc": "Сумма: сначала больше",
   "transactions.sortAmountAsc": "Сумма: сначала меньше",
+  "transactions.totalLabel": "Итого",
 
   "transactions.form.editTitle": "Изменить транзакцию",
   "transactions.form.newTitle": "Новая транзакция",
@@ -820,6 +821,7 @@ const en: Record<keyof typeof ru, string> = {
   "transactions.sortDateDesc": "Newest first",
   "transactions.sortAmountDesc": "Amount: high to low",
   "transactions.sortAmountAsc": "Amount: low to high",
+  "transactions.totalLabel": "Total",
 
   "transactions.form.editTitle": "Edit transaction",
   "transactions.form.newTitle": "New transaction",

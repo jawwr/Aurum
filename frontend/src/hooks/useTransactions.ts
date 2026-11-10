@@ -6,8 +6,10 @@ import {
   fetchAllTransactionsInRange,
   fetchTransactions,
   fetchTransactionYears,
+  fetchTransactionsTotal,
   updateTransaction,
   type TransactionFilters,
+  type TransactionTotalFilters,
 } from "@/api/transactions";
 import type { TransactionInput } from "@/types";
 
@@ -24,6 +26,7 @@ function useInvalidateAfterTransactionChange() {
     // is exactly the case the duplicate check exists to catch.
     queryClient.invalidateQueries({ queryKey: ["transactions-duplicate-check"] });
     queryClient.invalidateQueries({ queryKey: ["transaction-years"] });
+    queryClient.invalidateQueries({ queryKey: ["transactions-total"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
     queryClient.invalidateQueries({ queryKey: ["net-worth-summary"] });
     queryClient.invalidateQueries({ queryKey: ["category-spending-report"] });
@@ -39,6 +42,18 @@ export function useTransactions(filters: TransactionFilters) {
   return useQuery({
     queryKey: ["transactions", filters],
     queryFn: () => fetchTransactions(filters),
+  });
+}
+
+/** Net total of every transaction matching the current filters (income
+ * +, expense -, transfer 0). The filters object intentionally omits page
+ * and sort — the total doesn't depend on them, so react-query refetches
+ * only when the period/type/category/tag/search filters change, not on
+ * every page flip or sort toggle. */
+export function useTransactionsTotal(filters: TransactionTotalFilters) {
+  return useQuery({
+    queryKey: ["transactions-total", filters],
+    queryFn: () => fetchTransactionsTotal(filters),
   });
 }
 
