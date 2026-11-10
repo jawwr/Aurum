@@ -673,3 +673,133 @@ async def test_delete_transaction_cascades_its_splits(client: AsyncClient, accou
     # category filter would still find a (now-orphaned) match.
     resp = await client.get("/transactions", params={"category_id": sweets})
     assert resp.json()["total"] == 0
+
+
+async def test_total_with_no_transactions_returns_zero(client: AsyncClient):
+    resp = await client.get("/transactions/total")
+    assert resp.status_code == 200
+    assert money(resp.json()["total"]) == Decimal("0")
+
+
+async def test_total_sums_income_minus_expense(client: AsyncClient, account_id, categories):
+    """+20 income and -5 expense must net to +15 — the wire value is a number
+    (the big colored number on the page branches on its sign), and transfers
+    are neutral (see test_total_ignores_transfers below)."""
+    expense_cat = categories["Groceries"]["id"]
+    income_cat = categories["Salary"]["id"]
+    assert (await client.post("/transactions", json=_txn(account_id, category_id=expense_cat, amount="5.00"))).status_code == 201
+    assert (
+        await client.post(
+            "/transactions", json=_txn(account_id, type="income", amount="20.00", category_id=income_cat)
+        )
+    ).status_code == 201
+
+    resp = await client.get("/transactions/total")
+    assert resp.status_code == 200
+    assert money(resp.json()["total"]) == Decimal("15.00")
+
+
+async def test_total_ignores_transfers(client: AsyncClient, account_id):
+    """A transfer moves money between accounts — it doesn't change net worth,
+    so it has to contribute 0 to the total even though its amount is positive
+    on the row (amount is always stored positive, `type` carries the sign)."""
+    other = (await client.post("/accounts", json={"name": "Savings", "type": "savings"})).json()
+    assert (
+        await client.post(
+            "/transactions", json=_txn(account_id, type="transfer", amount="50.00", transfer_account_id=other["id"])
+        )
+    ).status_code == 201
+
+    resp = await client.get("/transactions/total")
+    assert money(resp.json()["total"]) == Decimal("0")
+
+
+async def test_total_respects_year_and_month_filter(client: AsyncClient, account_id, categories):
+    """The total has to honor the same period filter as the list — otherwise
+    the big number disagrees with the table below it whenever the user picks
+    a month."""
+    category_id = categories["Groceries"]["id"]
+    # +20 in July, -5 in August.
+    assert (
+        await client.post(
+            "/transactions",
+            json=_txn(account_id, type="income", amount="20.00", category_id=categories["Salary"]["id"], date="2025-07-10"),
+        )
+    ).status_code == 201
+    assert (
+        await client.post(
+            "/transactions", json=_txn(account_id, category_id=category_id, amount="5.00", date="2025-08-10")
+        )
+    ).status_code == 201
+
+    july = await client.get("/transactions/total", params={"year": 2025, "month": 7})
+    august = await client.get("/transactions/total", params={"year": 2025, "month": 8})
+    assert money(july.json()["total"]) == Decimal("20.00")
+    assert money(august.json()["total"]) == Decimal("-5.00")
+
+
+async def test_total_respects_type_filter(client: AsyncClient, account_id, categories):
+    """Filtering to expenses only yields the (negative) sum of expenses — the
+    sign has to be preserved so the page shows red for it."""
+    expense_cat = categories["Groceries"]["id"]
+    income_cat = categories["Salary"]["id"]
+    await client.post("/transactions", json=_txn(account_id, category_id=expense_cat, amount="5.00"))
+    await client.post("/transactions", json=_txn(account_id, category_id=expense_cat, amount="15.00"))
+    await client.post("/transactions", json=_txn(account_id, type="income", amount="100.00", category_id=income_cat))
+
+    expenses_only = await client.get("/transactions/total", params={"type": "expense"})
+    income_only = await client.get("/transactions/total", params={"type": "income"})
+    assert money(expenses_only.json()["total"]) == Decimal("-20.00")
+    assert money(income_only.json()["total"]) == Decimal("100.00")
+
+
+async def test_total_respects_category_filter_including_splits(client: AsyncClient, account_id, categories):
+    """A split transaction's category lives on its split lines, not the row
+    (category_id is NULL there) — the total's category filter has to count it
+    the same way the list endpoint does, or filtering by a subcategory would
+    show a non-zero table next to a zero total."""
+    groceries = categories["Groceries"]["id"]
+    sweets = await _subcategory(client, groceries, "Sweets")
+    # A 100.00 expense split 70/30 across Groceries and Sweets — both expense.
+    assert (
+        await client.post(
+            "/transactions",
+            json=_txn(
+                account_id,
+                amount="100.00",
+                category_id=None,
+                splits=[
+                    {"category_id": groceries, "amount": "70.00"},
+                    {"category_id": sweets, "amount": "30.00"},
+                ],
+            ),
+        )
+    ).status_code == 201
+
+    by_sweets = await client.get("/transactions/total", params={"category_id": sweets})
+    assert money(by_sweets.json()["total"]) == Decimal("-100.00")
+
+
+async def test_total_respects_search_filter(client: AsyncClient, account_id, categories):
+    category_id = categories["Groceries"]["id"]
+    await client.post("/transactions", json=_txn(account_id, category_id=category_id, amount="5.00", description="playstation"))
+    await client.post("/transactions", json=_txn(account_id, category_id=category_id, amount="50.00", description="groceries"))
+
+    resp = await client.get("/transactions/total", params={"search": "playstation"})
+    assert money(resp.json()["total"]) == Decimal("-5.00")
+
+
+async def test_total_ignores_pagination_and_sort_params(client: AsyncClient, account_id, categories):
+    """The total endpoint isn't driven by page/sort — passing them must not
+    change the number, and the page param being absent from the contract is
+    what lets the frontend call it once per filter change instead of once per
+    page flip."""
+    category_id = categories["Groceries"]["id"]
+    await client.post("/transactions", json=_txn(account_id, category_id=category_id, amount="5.00"))
+    await client.post("/transactions", json=_txn(account_id, category_id=category_id, amount="15.00"))
+
+    base = await client.get("/transactions/total")
+    with_page = await client.get("/transactions/total", params={"page": 2, "page_size": 1})
+    with_sort = await client.get("/transactions/total", params={"sort": "amount_desc"})
+    assert money(with_page.json()["total"]) == money(base.json()["total"])
+    assert money(with_sort.json()["total"]) == money(base.json()["total"])
