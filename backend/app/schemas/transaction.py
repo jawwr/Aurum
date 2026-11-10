@@ -198,6 +198,18 @@ class TransactionPage(BaseModel):
     page_size: int
 
 
+class TransactionTotal(BaseModel):
+    """Aggregate total of all transactions matching the same filters the
+    list endpoint takes (minus pagination/sort) — income counts as +amount,
+    expense as -amount, transfer as 0 (a transfer moves money between
+    accounts, it doesn't change net worth). Computed in the database via
+    SUM(CASE ...), not by pulling rows. `total` is a float so the JSON wire
+    format carries a number, not a string — the frontend compares against
+    zero for the red/green/grey coloring."""
+
+    total: float
+
+
 class TransactionBulkCreate(BaseModel):
     """CSV import (see routes/transactions.py's /bulk): the frontend parses
     the file and maps its columns client-side, then sends already-shaped

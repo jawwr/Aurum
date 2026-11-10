@@ -47,6 +47,30 @@ export async function fetchAllTransactionsInRange(filters: TransactionFilters): 
   return items;
 }
 
+/** Filters that actually change the net total — pagination and sort don't
+ * (the total is over every matching row regardless of which page you're
+ * looking at or how it's ordered), so the total endpoint doesn't take them
+ * and the hook below deliberately doesn't send them. */
+export interface TransactionTotalFilters {
+  year?: number;
+  month?: number;
+  start_date?: string;
+  end_date?: string;
+  account_id?: number;
+  category_id?: number;
+  tag_id?: number;
+  type?: string;
+  search?: string;
+}
+
+export function fetchTransactionsTotal(filters: TransactionTotalFilters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) params.set(key, String(value));
+  });
+  return api.get<{ total: number }>(`/transactions/total?${params.toString()}`);
+}
+
 /** Full range of years to offer in the year picker, from the earliest
  * transaction through the current year (see backend for the "gap year"
  * rationale). */
