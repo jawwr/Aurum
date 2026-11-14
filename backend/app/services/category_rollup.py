@@ -60,19 +60,25 @@ class CategoryRollupItem:
     children: list[CategoryRollupChildItem] = field(default_factory=list)
 
 
-async def _raw_category_contributions(
+async def raw_category_contributions(
     session: AsyncSession,
     *,
     transaction_type: TransactionType,
     start_date: date_ | None,
     end_date: date_ | None,
+    account_id: int | None = None,
 ) -> list[tuple[int, int, Decimal]]:
     """(transaction_id, category_id, amount) for every category a
     transaction of this type/date-range contributed to. A plain transaction
     contributes one row (its own category); a split one contributes one row
     per split line — never both for the same transaction, since a
     transaction is either plain (category_id set, no splits) or split
-    (category_id NULL, 2+ splits), enforced at write time."""
+    (category_id NULL, 2+ splits), enforced at write time.
+
+    Public (not just used by rollup_spending_by_top_level_category below):
+    services/diagrams.py's SUBCATEGORY dimension wants these leaf-level
+    contributions as-is, without the parent rollup this module otherwise
+    exists for."""
     plain_stmt = select(Transaction.id, Transaction.category_id, Transaction.amount).where(
         Transaction.type == transaction_type, Transaction.category_id.is_not(None)
     )
@@ -87,6 +93,9 @@ async def _raw_category_contributions(
     if end_date is not None:
         plain_stmt = plain_stmt.where(Transaction.date <= end_date)
         split_stmt = split_stmt.where(Transaction.date <= end_date)
+    if account_id is not None:
+        plain_stmt = plain_stmt.where(Transaction.account_id == account_id)
+        split_stmt = split_stmt.where(Transaction.account_id == account_id)
 
     plain_rows = (await session.execute(plain_stmt)).all()
     split_rows = (await session.execute(split_stmt)).all()
@@ -99,12 +108,13 @@ async def rollup_spending_by_top_level_category(
     transaction_type: TransactionType,
     start_date: date_ | None = None,
     end_date: date_ | None = None,
+    account_id: int | None = None,
 ) -> list[CategoryRollupItem]:
     """Every top-level category's total for the period, sorted by amount
     desc (category sort_order as tiebreak — same order the SQL-only version
     used to produce)."""
-    contributions = await _raw_category_contributions(
-        session, transaction_type=transaction_type, start_date=start_date, end_date=end_date
+    contributions = await raw_category_contributions(
+        session, transaction_type=transaction_type, start_date=start_date, end_date=end_date, account_id=account_id
     )
     if not contributions:
         return []

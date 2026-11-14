@@ -197,6 +197,50 @@ export interface DashboardSummary {
   spending_by_category: CategoryBreakdownItem[];
 }
 
+export type WidgetType = "pie" | "bar" | "line";
+export type WidgetDimension = "category" | "subcategory" | "account" | "tag" | "type" | "total";
+export type WidgetMetric = "sum" | "count";
+export type WidgetGranularity = "day" | "week" | "month";
+
+// One entry per WidgetType — drives the "Add widget" form's dimension/metric
+// pickers straight from what the backend actually accepts, instead of a
+// second hand-kept list here that could drift out of sync.
+export interface WidgetTypeManifestEntry {
+  type: WidgetType;
+  allowed_dimensions: WidgetDimension[];
+  allowed_metrics: WidgetMetric[];
+  needs_granularity: boolean;
+}
+
+export interface DiagramPoint {
+  label: string;
+  value: string;
+  color: string | null;
+}
+
+export interface DashboardWidget {
+  id: number;
+  type: WidgetType;
+  title: string;
+  dimension: WidgetDimension;
+  metric: WidgetMetric;
+  transaction_type: TransactionType | null;
+  granularity: WidgetGranularity | null;
+  account_id: number | null;
+  sort_order: number;
+  data: { points: DiagramPoint[] };
+}
+
+export interface DashboardWidgetInput {
+  type: WidgetType;
+  title: string;
+  dimension: WidgetDimension;
+  metric: WidgetMetric;
+  transaction_type: TransactionType | null;
+  granularity: WidgetGranularity | null;
+  account_id: number | null;
+}
+
 export type AssetClass = "investments" | "crypto" | "real_estate" | "vehicles" | "precious_metals" | "other";
 export type NetWorthRange = "30d" | "90d" | "1y" | "5y" | "all";
 export type CapitalRole = "income" | "neutral" | "drain";

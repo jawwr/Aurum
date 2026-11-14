@@ -57,6 +57,42 @@ class CryptoTransactionType(str, enum.Enum):
     SELL = "sell"
 
 
+class WidgetType(str, enum.Enum):
+    """Chart shape a dashboard widget renders as — see
+    services/diagrams.py's Diagram subclasses, one per member here."""
+
+    PIE = "pie"
+    BAR = "bar"
+    LINE = "line"
+
+
+class WidgetDimension(str, enum.Enum):
+    """What a widget breaks its totals down by. TOTAL means "no breakdown,
+    one line" — exclusive to WidgetType.LINE, where a per-category/account/tag
+    breakdown would mean multiple series, not supported yet (see
+    services/diagrams.py)."""
+
+    CATEGORY = "category"
+    SUBCATEGORY = "subcategory"
+    ACCOUNT = "account"
+    TAG = "tag"
+    TYPE = "type"
+    TOTAL = "total"
+
+
+class WidgetMetric(str, enum.Enum):
+    SUM = "sum"
+    COUNT = "count"
+
+
+class WidgetGranularity(str, enum.Enum):
+    """Time-bucket size for a WidgetType.LINE widget's x-axis."""
+
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+
 class RiskLevel(str, enum.Enum):
     """Risk of loss, not asset class — set by the user, not inferred: real
     estate can be a paid-off primary home (LOW) or a leveraged rental
