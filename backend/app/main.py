@@ -13,6 +13,7 @@ from app.api.routes import (
     categories,
     crypto,
     dashboard,
+    dashboard_widgets,
     goals,
     insights,
     net_worth,
@@ -71,6 +72,7 @@ if cors_origins:
     )
 
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(dashboard_widgets.router, prefix="/api")
 app.include_router(accounts.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")
 app.include_router(transactions.router, prefix="/api")
