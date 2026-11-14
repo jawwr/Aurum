@@ -75,6 +75,11 @@ const ru = {
   "dashboard.noTransactionsYet": "Транзакций пока нет.",
 
   "dashboard.widgets.sectionTitle": "Мои виджеты",
+  "dashboard.widgets.dirty": "Изменено",
+  "dashboard.widgets.saveDashboardButton": "Сохранить",
+  "dashboard.widgets.revertButton": "Откатить",
+  "dashboard.widgets.confirmLoseChanges": "Есть несохранённые изменения. Покинуть страницу и потерять их?",
+  "dashboard.widgets.saveError": "Не удалось сохранить виджеты. Черновик сохранён в форме — исправьте данные и повторите попытку.",
   "dashboard.widgets.addButton": "Добавить виджет",
   "dashboard.widgets.modalTitle": "Новый виджет",
   "dashboard.widgets.dataSourceLabel": "Источник данных",
@@ -655,6 +660,11 @@ const en: Record<keyof typeof ru, string> = {
   "dashboard.noTransactionsYet": "No transactions yet.",
 
   "dashboard.widgets.sectionTitle": "My widgets",
+  "dashboard.widgets.dirty": "Changed",
+  "dashboard.widgets.saveDashboardButton": "Save",
+  "dashboard.widgets.revertButton": "Revert",
+  "dashboard.widgets.confirmLoseChanges": "You have unsaved changes. Leave this page and lose them?",
+  "dashboard.widgets.saveError": "The widgets could not be saved. Your draft is still here; correct it and try again.",
   "dashboard.widgets.addButton": "Add widget",
   "dashboard.widgets.modalTitle": "New widget",
   "dashboard.widgets.dataSourceLabel": "Data source",

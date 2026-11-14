@@ -88,13 +88,73 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
 `categorical`, Line — с `time_series`. Поэтому Backend может отдать в manifest
 совместимые измерения, метрики и DataSpec без SQL-логики в диаграммах.
 
+## Хранение конфигурации
+
+Все пользовательские виджеты Dashboard хранятся одним JSON-документом, а не
+отдельными строками. Для этого используется уже существующая singleton-строка
+`app_settings` с `id = 1`: новая колонка `dashboard_config` имеет тип PostgreSQL
+`JSONB`. Новая система пользователей или отдельное владение Dashboard не
+создаётся — сохраняется существующая область общих пользовательских данных
+приложения.
+
+В базе хранится только конфигурация. Результаты запросов, точки диаграмм,
+агрегированные суммы и другие вычисленные значения в `dashboard_config` не
+записываются.
+
+Текущий документ имеет версию схемы `1`:
+
+```json
+{
+  "schema_version": 1,
+  "widgets": [
+    {
+      "id": "stable-widget-id",
+      "title": "Расходы по категориям",
+      "data_source": "transactions",
+      "data_spec": "analytics",
+      "query": {
+        "dimension": "category",
+        "metric": "sum",
+        "filters": {
+          "transaction_type": "expense",
+          "account_id": null
+        },
+        "granularity": null
+      },
+      "visualization": {
+        "type": "pie",
+        "options": {}
+      }
+    }
+  ]
+}
+```
+
+Основные правила хранения:
+
+- `schema_version` обязателен и сейчас должен быть равен `1`;
+- `widgets` — упорядоченный массив, его порядок является порядком Dashboard;
+- `id` каждого виджета — стабильная непустая строка, ID не повторяются;
+- `data_source` и `data_spec` определяют источник и спецификацию данных;
+- параметры запроса находятся внутри `query`, фильтры — внутри `query.filters`;
+- параметры отображения находятся внутри `visualization`;
+- backend запрещает неизвестные поля через Pydantic `extra="forbid"`;
+- новые поля конфигурации добавляются через версию схемы и явные модели, а не
+  через произвольный JSON.
+
+Миграция
+`backend/alembic/versions/7c1d2e3f4a56_store_dashboard_as_json.py` выполняет
+перенос старых строк `dashboard_widgets`: сортирует их по `sort_order`,
+переносит существующие числовые ID как строковые, преобразует плоские поля в
+`query` и `visualization`, затем удаляет старую таблицу. Вычисленные данные не
+переносятся. Downgrade сначала проверяет, что все документы можно представить
+старой схемой, и прерывается с ошибкой вместо молчаливой потери новых полей.
+
 ## Конфигурация и API
 
-Сохранённая конфигурация `DashboardWidget` содержит `data_source` и `data_spec`.
-Для старых виджетов миграция
-`backend/alembic/versions/d2f7a1b8c904_add_data_source_to_dashboard_widgets.py`
-заполняет значения `transactions` и `analytics`; существующие поля диаграммы
-остаются совместимыми.
+Сохранённая конфигурация `DashboardConfig` и вычисленные данные разделены в
+ответе API. Endpoint типов виджетов остаётся capability-manifest и не хранит
+пользовательские настройки.
 
 `GET /api/dashboard/widgets/types` возвращает:
 
@@ -234,20 +294,117 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
 спецификации. Отдельного селектора спецификации нет. Идентификаторы источника
 и спецификации отправляются в конфигурации.
 
-## Поток данных
+## GET и PUT Dashboard
 
-1. Frontend получает manifest и отправляет конфигурацию виджета.
-2. `dashboard_widget_service` проверяет диаграмму, источник, спецификацию и
-   существование `account_id`.
-3. При чтении виджета сервис добавляет границы выбранного месяца.
-4. DataSpec выполняет запросы и возвращает Dataset.
-5. Diagram преобразует Dataset в `DiagramData`.
-6. API сериализует точки, включая ключ, идентификатор, цвет, иконку и временной
-   bucket.
+`GET /api/dashboard/widgets?year=2026&month=9` возвращает сохранённую
+конфигурацию отдельно от рассчитанных данных:
 
-Числа не сохраняются в таблице виджетов и вычисляются заново при чтении.
+```json
+{
+  "config": {
+    "schema_version": 1,
+    "widgets": [
+      {
+        "id": "stable-widget-id",
+        "title": "Расходы по категориям",
+        "data_source": "transactions",
+        "data_spec": "analytics",
+        "query": {
+          "dimension": "category",
+          "metric": "sum",
+          "filters": {"transaction_type": "expense", "account_id": null},
+          "granularity": null
+        },
+        "visualization": {"type": "pie", "options": {}}
+      }
+    ]
+  },
+  "widgets": [
+    {
+      "id": "stable-widget-id",
+      "data": {
+        "points": [
+          {
+            "label": "Продукты",
+            "value": "125.00",
+            "key": "category:7",
+            "element_id": 7,
+            "color": "#1baf7a",
+            "icon": "shopping-basket",
+            "time_bucket": null,
+            "series_key": null
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+`year` и `month` влияют только на вычисляемые `widgets.data`; сохранённый
+`config` от периода не зависит. Повторный GET пересчитывает данные заново.
+
+`PUT /api/dashboard/widgets?year=2026&month=9` принимает полный документ
+`DashboardConfig`, а не отдельный виджет. Backend валидирует всю структуру,
+каждый DataSource/DataSpec, совместимость с Diagram и ссылки вроде
+`account_id`, затем атомарно заменяет весь JSONB-документ и возвращает свежие
+данные. При ошибке валидации или commit частичное сохранение не выполняется.
+Старые `POST`, `PATCH` и `DELETE` для отдельных виджетов больше не являются
+источником истины.
+
+## Поток данных и SQL-запросы
+
+1. Frontend получает manifest и GET сохранённого Dashboard.
+2. Backend читает `app_settings.dashboard_config` и валидирует документ.
+3. `dashboard_widget_service` строит DataSpec из `query` и проверяет источник,
+   спецификацию, диаграмму и ссылки на сущности.
+4. При чтении сервис добавляет границы выбранного месяца как временные
+   параметры, не изменяя сохранённый JSON.
+5. DataSpec выполняет SQL-запросы и возвращает Dataset.
+6. Diagram преобразует Dataset в `DiagramData`.
+7. API сериализует точки, включая ключ, идентификатор, цвет, иконку и bucket.
+
+SQL-логика находится в `TransactionAnalyticsDataSpec` и
+`TransactionDataSource`, а не в route или Diagram. Общий
+`filter_query()` применяет фильтры до агрегации:
+
+- `transaction_type` ограничивает `Transaction.type`;
+- `start_date`/`end_date` ограничивают `Transaction.date`;
+- `account_id` ограничивает `Transaction.account_id`.
+
+Затем DataSpec выбирает группировку: `category` использует category rollup,
+`subcategory` сохраняет листовые категории, `account` группирует по счетам,
+`tag` соединяет таблицы тегов, `type` группирует по типам, а `total` использует
+`date_trunc(granularity, Transaction.date)`. `sum` использует сумму, `count`
+сохраняет правила подсчёта транзакций конкретного измерения. Split-транзакции
+и фильтрация до агрегации тем самым сохраняют текущую финансовую семантику.
+
+Для `year=2026&month=9` передаются даты `2026-09-01` и `2026-09-30`; для
+временных виджетов дополнительно применяется `day`, `week` или `month`.
+Числа не сохраняются в JSONB и вычисляются заново при каждом GET или PUT.
 
 ## Расширение системы
+
+### Saved и draft конфигурации на Frontend
+
+`frontend/src/hooks/useDashboardWidgets.ts` после GET создаёт две независимые
+копии:
+
+- `savedConfig` — последнее состояние, подтверждённое Backend;
+- `draftConfig` — текущая рабочая копия;
+- `isDirty` — результат сравнения двух JSON-документов.
+
+Добавление, редактирование и удаление меняют только `draftConfig`; отдельные
+POST/PATCH/DELETE-запросы не выполняются. Кнопка сохранения отправляет весь
+draft через PUT, после успешного ответа повторяет GET и только затем заменяет
+обе локальные копии. При ошибке draft остаётся неизменным. Кнопка отката
+заменяет draft копией `savedConfig`. Конфигурация Dashboard не восстанавливается
+из `localStorage`.
+
+При `isDirty` используется стандартный `beforeunload` для закрытия и
+перезагрузки страницы. Текущий `BrowserRouter` приложения не поддерживает
+штатный blocker API data-router, поэтому собственная имитация предупреждения
+для SPA-переходов не добавляется.
 
 ### Новый DataSource
 
@@ -279,7 +436,10 @@ manifest и тесты сортировки, агрегации и обрабо�
 
 `backend/tests/test_dashboard_widget_architecture.py` проверяет регистрацию
 источника и спецификации, валидацию конфигурации, общий Dataset, отсутствие
-ORM-зависимости Diagram, правила Pie/Bar/Line, обратную совместимость старого
-payload и manifest. `backend/tests/test_widget_account_filter.py` проверяет
-перенос account-фильтра через DataSpec, включая split-транзакции, rollup и
-уникальный `count`.
+ORM-зависимости Diagram, правила Pie/Bar/Line, GET/PUT-разделение конфигурации
+и данных, порядок, атомарность невалидного сохранения, ссылки и manifest.
+`backend/tests/test_dashboard_widget_queries.py` проверяет SQL-агрегации и
+фильтрацию до агрегации, включая split-транзакции, rollup, временные bucket'ы
+и `count`. `frontend/src/api/dashboardWidgets.test.ts` проверяет полный PUT,
+а `frontend/src/lib/dashboardConfig.test.ts` — clone, upsert, удаление и
+порядок локального draft.

@@ -4,11 +4,11 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { useAccounts } from "@/hooks/useAccounts";
-import { useCreateDashboardWidget, useUpdateDashboardWidget, useWidgetTypes } from "@/hooks/useDashboardWidgets";
+import { useWidgetTypes } from "@/hooks/useDashboardWidgets";
 import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { getWidgetCapabilities } from "@/api/dashboardWidgets";
 import type {
-  DashboardWidget,
+  DashboardWidgetConfig,
   DashboardWidgetInput,
   TransactionType,
   WidgetDimension,
@@ -20,11 +20,8 @@ import type {
 interface AddWidgetModalProps {
   open: boolean;
   onClose: () => void;
-  year: number;
-  month: number;
-  /** Present -> edit that widget (same form, pre-filled, PATCH on submit).
-   * Absent -> create a new one. */
-  widget?: DashboardWidget | null;
+  widget?: DashboardWidgetConfig | null;
+  onSubmit: (input: DashboardWidgetInput) => void;
 }
 
 const CHART_TYPE_ICONS: Record<WidgetType, LucideIcon> = { pie: PieChartIcon, bar: BarChart3, line: LineChartIcon };
@@ -46,13 +43,10 @@ const EMPTY_FORM = {
  * never unmounts (DashboardPage renders it unconditionally, Dialog just
  * hides its content), so the fields are (re)populated from `widget` in an
  * effect keyed on `open`, the same pattern TransactionFormModal uses. */
-export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidgetModalProps) {
+export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetModalProps) {
   const { t } = useTranslation();
   const { data: widgetTypes } = useWidgetTypes();
   const { data: accounts } = useAccounts();
-  const createWidget = useCreateDashboardWidget(year, month);
-  const updateWidget = useUpdateDashboardWidget(year, month);
-  const isSaving = createWidget.isPending || updateWidget.isPending;
 
   const [chartType, setChartType] = useState(EMPTY_FORM.chartType);
   const [dataSource, setDataSource] = useState("");
@@ -68,13 +62,13 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
     if (!open) return;
     if (widget) {
       setDataSource(widget.data_source);
-      setChartType(widget.type);
+       setChartType(widget.visualization.type);
       setTitle(widget.title);
-      setDimension(widget.dimension);
-      setMetric(widget.metric);
-      setTransactionType(widget.transaction_type ?? "");
-      setGranularity(widget.granularity ?? "");
-      setAccountId(widget.account_id ? String(widget.account_id) : "");
+       setDimension(widget.query.dimension);
+       setMetric(widget.query.metric);
+       setTransactionType(widget.query.filters.transaction_type ?? "");
+       setGranularity(widget.query.granularity ?? "");
+       setAccountId(widget.query.filters.account_id ? String(widget.query.filters.account_id) : "");
     } else {
       setDataSource("");
       setChartType(EMPTY_FORM.chartType);
@@ -127,7 +121,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
     setError(null);
   }
 
-  async function handleSubmit(event: React.FormEvent) {
+  function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
     if (!chartType || !dimension || !metric || !capabilities) return;
@@ -156,11 +150,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
       granularity: needsGranularity ? (granularity as WidgetGranularity) : null,
       account_id: supportsAccountFilter && accountId ? Number(accountId) : null,
     };
-    if (widget) {
-      await updateWidget.mutateAsync({ id: widget.id, input: payload });
-    } else {
-      await createWidget.mutateAsync(payload);
-    }
+    onSubmit(payload);
     handleClose();
   }
 
@@ -329,7 +319,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
           <Button type="button" variant="secondary" onClick={handleClose}>
             {t("common.cancel")}
           </Button>
-          <Button type="submit" disabled={!capabilities || !dimension || !metric || isSaving}>
+           <Button type="submit" disabled={!capabilities || !dimension || !metric}>
             {widget ? t("dashboard.widgets.saveEditButton") : t("dashboard.widgets.saveButton")}
           </Button>
         </div>

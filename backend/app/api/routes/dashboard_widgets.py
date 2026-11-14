@@ -4,13 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.schemas.dashboard_widget import DashboardWidgetCreate, DashboardWidgetManifest, DashboardWidgetRead
+from app.schemas.dashboard_widget import DashboardConfig, DashboardWidgetManifest, DashboardWidgetsResponse
 from app.services.dashboard_widget_service import (
-    create_widget,
-    delete_widget,
     list_widget_types,
     list_widgets,
-    update_widget,
+    save_widgets,
 )
 
 router = APIRouter(prefix="/dashboard/widgets", tags=["dashboard-widgets"])
@@ -22,36 +20,20 @@ def read_widget_types() -> DashboardWidgetManifest:
     return list_widget_types()
 
 
-@router.get("", response_model=list[DashboardWidgetRead])
+@router.get("", response_model=DashboardWidgetsResponse)
 async def read_widgets(
     year: int = Query(default_factory=lambda: date.today().year, ge=2000, le=2100),
     month: int = Query(default_factory=lambda: date.today().month, ge=1, le=12),
     session: AsyncSession = Depends(get_session),
-) -> list[DashboardWidgetRead]:
+) -> DashboardWidgetsResponse:
     return await list_widgets(session, year, month)
 
 
-@router.post("", response_model=DashboardWidgetRead, status_code=201)
-async def add_widget(
-    payload: DashboardWidgetCreate,
+@router.put("", response_model=DashboardWidgetsResponse)
+async def save_dashboard_widgets(
+    payload: DashboardConfig,
     year: int = Query(default_factory=lambda: date.today().year, ge=2000, le=2100),
     month: int = Query(default_factory=lambda: date.today().month, ge=1, le=12),
     session: AsyncSession = Depends(get_session),
-) -> DashboardWidgetRead:
-    return await create_widget(session, payload, year, month)
-
-
-@router.patch("/{widget_id}", response_model=DashboardWidgetRead)
-async def edit_widget(
-    widget_id: int,
-    payload: DashboardWidgetCreate,
-    year: int = Query(default_factory=lambda: date.today().year, ge=2000, le=2100),
-    month: int = Query(default_factory=lambda: date.today().month, ge=1, le=12),
-    session: AsyncSession = Depends(get_session),
-) -> DashboardWidgetRead:
-    return await update_widget(session, widget_id, payload, year, month)
-
-
-@router.delete("/{widget_id}", status_code=204)
-async def remove_widget(widget_id: int, session: AsyncSession = Depends(get_session)) -> None:
-    await delete_widget(session, widget_id)
+) -> DashboardWidgetsResponse:
+    return await save_widgets(session, payload, year, month)

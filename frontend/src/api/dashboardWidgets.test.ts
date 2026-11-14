@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createDashboardWidget, fetchWidgetTypes, getWidgetCapabilities } from "@/api/dashboardWidgets";
+import { fetchWidgetTypes, getWidgetCapabilities, saveDashboardWidgets } from "@/api/dashboardWidgets";
 import type { DashboardWidgetManifest } from "@/types";
 
 vi.mock("@/lib/auth", () => ({
@@ -89,34 +89,39 @@ describe("dashboard widget API contracts", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/dashboard/widgets/types", expect.any(Object));
   });
 
-  it("sends the source/spec pair with widget configuration", async () => {
+  it("sends the complete versioned Dashboard document with PUT", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      status: 201,
-      json: async () => ({ id: 1 }),
+      status: 200,
+      json: async () => ({ config: { schema_version: 1, widgets: [] }, widgets: [] }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await createDashboardWidget(
-      {
+    await saveDashboardWidgets({
+      schema_version: 1,
+      widgets: [{
+        id: "widget-1",
         data_source: "transactions",
         data_spec: "analytics",
-        type: "bar",
         title: "Expenses",
-        dimension: "category",
-        metric: "sum",
-        transaction_type: "expense",
-        granularity: null,
-        account_id: null,
-      },
+        query: {
+          dimension: "category",
+          metric: "sum",
+          filters: { transaction_type: "expense", account_id: null },
+          granularity: null,
+        },
+        visualization: { type: "bar", options: {} },
+      }],
+    },
       2026,
       8,
     );
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(init.body as string)).toMatchObject({
-      data_source: "transactions",
-      data_spec: "analytics",
+      schema_version: 1,
+      widgets: [{ id: "widget-1", query: { dimension: "category" } }],
     });
+    expect(init.method).toBe("PUT");
   });
 });

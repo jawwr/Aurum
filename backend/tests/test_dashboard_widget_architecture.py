@@ -229,24 +229,38 @@ def test_dataset_rejects_duplicate_keys_missing_buckets_and_nonfinite_values():
     assert LineDiagram().render(Dataset(kind="time_series")).points == []
 
 
-async def test_existing_widget_payload_defaults_to_transactions_analytics(client: AsyncClient, account_id, categories):
-    response = await client.post(
-        "/dashboard/widgets?year=2026&month=8",
-        json={
-            "type": "bar",
-            "title": "Expenses",
+def _dashboard_config(*widgets):
+    return {"schema_version": 1, "widgets": list(widgets)}
+
+
+def _widget(widget_id="widget-1", **overrides):
+    widget = {
+        "id": widget_id,
+        "title": "Expenses",
+        "data_source": "transactions",
+        "data_spec": "analytics",
+        "query": {
             "dimension": "category",
             "metric": "sum",
-            "transaction_type": "expense",
+            "filters": {"transaction_type": "expense", "account_id": None},
             "granularity": None,
-            "account_id": None,
         },
+        "visualization": {"type": "bar", "options": {}},
+    }
+    widget.update(overrides)
+    return widget
+
+
+async def test_get_and_put_return_separate_config_and_calculated_data(client: AsyncClient, account_id, categories):
+    response = await client.put(
+        "/dashboard/widgets?year=2026&month=8",
+        json=_dashboard_config(_widget()),
     )
-    assert response.status_code == 201
+    assert response.status_code == 200
     body = response.json()
-    assert body["data_source"] == "transactions"
-    assert body["data_spec"] == "analytics"
-    assert body["data"]["points"] == []
+    assert body["config"]["schema_version"] == 1
+    assert body["config"]["widgets"][0]["id"] == "widget-1"
+    assert body["widgets"] == [{"id": "widget-1", "data": {"points": []}}]
 
     await client.post(
         "/transactions",
@@ -254,10 +268,31 @@ async def test_existing_widget_payload_defaults_to_transactions_analytics(client
     )
     refreshed = await client.get("/dashboard/widgets", params={"year": 2026, "month": 8})
     assert refreshed.status_code == 200
-    point = refreshed.json()[0]["data"]["points"][0]
+    point = refreshed.json()["widgets"][0]["data"]["points"][0]
     assert money(point["value"]) == Decimal("25.00")
     assert point["key"] == f"category:{categories['Groceries']['id']}"
     assert point["element_id"] == categories["Groceries"]["id"]
+
+
+async def test_dashboard_config_preserves_widget_order(client: AsyncClient):
+    response = await client.put(
+        "/dashboard/widgets?year=2026&month=8",
+        json=_dashboard_config(_widget("first"), _widget("second", title="Second")),
+    )
+    assert response.status_code == 200
+    assert [widget["id"] for widget in response.json()["config"]["widgets"]] == ["first", "second"]
+
+
+async def test_invalid_save_is_atomic_and_keeps_previous_configuration(client: AsyncClient):
+    saved = await client.put("/dashboard/widgets?year=2026&month=8", json=_dashboard_config(_widget()))
+    assert saved.status_code == 200
+    invalid = await client.put(
+        "/dashboard/widgets?year=2026&month=8",
+        json=_dashboard_config({**_widget(), "data_spec": "missing"}),
+    )
+    assert invalid.status_code == 400
+    current = await client.get("/dashboard/widgets", params={"year": 2026, "month": 8})
+    assert [widget["id"] for widget in current.json()["config"]["widgets"]] == ["widget-1"]
 
 
 async def test_widget_api_preserves_pie_bar_and_line_results(client: AsyncClient, account_id, categories):
@@ -270,24 +305,14 @@ async def test_widget_api_preserves_pie_bar_and_line_results(client: AsyncClient
         json=_txn(account_id, amount="10.00", category_id=categories["Dining Out"]["id"], date="2026-08-06"),
     )
 
-    common = {
-        "metric": "sum",
-        "transaction_type": "expense",
-        "granularity": None,
-        "account_id": None,
-    }
-    created = []
-    for widget in [
-        {"type": "pie", "title": "Pie", "dimension": "category"},
-        {"type": "bar", "title": "Bar", "dimension": "category"},
-        {"type": "line", "title": "Line", "dimension": "total", "granularity": "day"},
-    ]:
-        response = await client.post(
-            "/dashboard/widgets?year=2026&month=8",
-            json={**common, **widget},
-        )
-        assert response.status_code == 201
-        created.append(response.json())
+    widgets = [
+        _widget("pie", title="Pie", visualization={"type": "pie", "options": {}}),
+        _widget("bar", title="Bar"),
+        _widget("line", title="Line", query={"dimension": "total", "metric": "sum", "filters": {"transaction_type": "expense", "account_id": None}, "granularity": "day"}, visualization={"type": "line", "options": {}}),
+    ]
+    response = await client.put("/dashboard/widgets?year=2026&month=8", json=_dashboard_config(*widgets))
+    assert response.status_code == 200
+    created = response.json()["widgets"]
 
     assert {point["label"]: money(point["value"]) for point in created[0]["data"]["points"]} == {
         "Groceries": Decimal("25.00"),
@@ -325,59 +350,50 @@ async def test_widget_manifest_describes_sources_specs_and_visualization_compati
 
 
 async def test_widget_endpoint_rejects_unknown_source_spec_and_incompatible_diagram(client: AsyncClient):
-    payload = {
-        "type": "pie",
-        "title": "Invalid",
-        "dimension": "category",
-        "metric": "sum",
-        "transaction_type": "expense",
-        "granularity": None,
-        "account_id": None,
-    }
-
-    unknown_source = await client.post(
+    unknown_source = await client.put(
         "/dashboard/widgets?year=2026&month=8",
-        json={**payload, "data_source": "budgets"},
+        json=_dashboard_config({**_widget(), "data_source": "budgets"}),
     )
     assert unknown_source.status_code == 400
 
-    unknown_spec = await client.post(
+    unknown_spec = await client.put(
         "/dashboard/widgets?year=2026&month=8",
-        json={**payload, "data_spec": "missing"},
+        json=_dashboard_config({**_widget(), "data_spec": "missing"}),
     )
     assert unknown_spec.status_code == 400
 
-    invalid_line = await client.post(
+    invalid_line = await client.put(
         "/dashboard/widgets?year=2026&month=8",
-        json={**payload, "type": "line"},
+        json=_dashboard_config({**_widget(), "visualization": {"type": "line", "options": {}}}),
     )
     assert invalid_line.status_code == 400
 
-    invalid_type_filter = await client.post(
+    invalid_type_filter = await client.put(
         "/dashboard/widgets?year=2026&month=8",
-        json={**payload, "dimension": "type", "transaction_type": "expense"},
+        json=_dashboard_config({**_widget(), "query": {"dimension": "type", "metric": "sum", "filters": {"transaction_type": "expense", "account_id": None}, "granularity": None}}),
     )
     assert invalid_type_filter.status_code == 400
 
-    missing_account = await client.post(
+    missing_account = await client.put(
         "/dashboard/widgets?year=2026&month=8",
-        json={**payload, "account_id": 999999},
+        json=_dashboard_config({**_widget(), "query": {"dimension": "category", "metric": "sum", "filters": {"transaction_type": "expense", "account_id": 999999}, "granularity": None}}),
     )
     assert missing_account.status_code == 400
     assert missing_account.json()["detail"] == "Account not found"
 
 
-async def test_widget_endpoint_returns_not_found_for_missing_widget(client: AsyncClient):
-    payload = {
-        "type": "bar",
-        "title": "Missing",
-        "dimension": "category",
-        "metric": "sum",
-        "transaction_type": "expense",
-        "granularity": None,
-        "account_id": None,
-    }
-    patched = await client.patch("/dashboard/widgets/999999?year=2026&month=8", json=payload)
-    assert patched.status_code == 404
-    deleted = await client.delete("/dashboard/widgets/999999")
-    assert deleted.status_code == 404
+async def test_widget_endpoint_rejects_duplicate_ids(client: AsyncClient):
+    response = await client.put(
+        "/dashboard/widgets?year=2026&month=8",
+        json=_dashboard_config(_widget("same"), _widget("same")),
+    )
+    assert response.status_code == 422
+
+
+async def test_widget_endpoint_rejects_unbounded_configuration_fields(client: AsyncClient):
+    invalid = {**_widget(), "unexpected": True}
+    response = await client.put(
+        "/dashboard/widgets?year=2026&month=8",
+        json=_dashboard_config(invalid),
+    )
+    assert response.status_code == 422
