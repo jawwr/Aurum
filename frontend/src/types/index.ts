@@ -249,7 +249,7 @@ export interface DiagramPoint {
 }
 
 export interface DashboardWidget {
-  id: number;
+  id: string;
   data_source: string;
   data_spec: string;
   type: WidgetType;
@@ -259,8 +259,36 @@ export interface DashboardWidget {
   transaction_type: TransactionType | null;
   granularity: WidgetGranularity | null;
   account_id: number | null;
-  sort_order: number;
   data: { points: DiagramPoint[] };
+}
+
+export interface DashboardWidgetConfig {
+  id: string;
+  title: string;
+  data_source: string;
+  data_spec: string;
+  query: {
+    dimension: WidgetDimension;
+    metric: WidgetMetric;
+    filters: { transaction_type: TransactionType | null; account_id: number | null };
+    granularity: WidgetGranularity | null;
+  };
+  visualization: { type: WidgetType; options: Record<string, string | number | boolean | null> };
+}
+
+export interface DashboardConfig {
+  schema_version: number;
+  widgets: DashboardWidgetConfig[];
+}
+
+export interface DashboardWidgetData {
+  id: string;
+  data: { points: DiagramPoint[] };
+}
+
+export interface DashboardWidgetsResponse {
+  config: DashboardConfig;
+  widgets: DashboardWidgetData[];
 }
 
 export interface DashboardWidgetInput {

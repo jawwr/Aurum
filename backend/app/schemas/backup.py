@@ -15,6 +15,7 @@ from app.models.enums import (
     RiskLevel,
     TransactionType,
 )
+from app.schemas.dashboard_widget import DashboardConfig
 
 
 class AccountBackup(BaseModel):
@@ -217,6 +218,9 @@ class AppSettingsBackup(BaseModel):
     # still imports cleanly under the same format version.
     idle_cash_threshold_amount: Decimal = Decimal("1000")
     idle_cash_threshold_days: int = 60
+    # Stored with the singleton settings row so a full backup restores the
+    # saved Dashboard layout as well as financial settings.
+    dashboard_config: DashboardConfig = Field(default_factory=lambda: DashboardConfig(schema_version=1, widgets=[]))
 
 
 class BackupPayload(BaseModel):

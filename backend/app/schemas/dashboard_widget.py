@@ -1,7 +1,8 @@
 from datetime import date as date_
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import TransactionType, WidgetDimension, WidgetGranularity, WidgetMetric, WidgetType
 from app.services.dataset import DatasetKind
@@ -41,8 +42,6 @@ class DataSourceManifestEntry(BaseModel):
 
 
 class WidgetTypeManifestEntry(BaseModel):
-    """Backend-declared visualization capabilities and source compatibility."""
-
     type: WidgetType
     dataset_kind: DatasetKind
     allowed_dimensions: list[str]
@@ -56,29 +55,73 @@ class DashboardWidgetManifest(BaseModel):
     diagrams: list[WidgetTypeManifestEntry]
 
 
-class DashboardWidgetFields(BaseModel):
-    # Defaults preserve the stored/API shape of widgets created before the
-    # source/spec split was introduced.
-    data_source: str = Field(default="transactions", min_length=1, max_length=50)
-    data_spec: str = Field(default="analytics", min_length=1, max_length=80)
-    type: WidgetType
-    title: str = Field(min_length=1, max_length=100)
-    dimension: WidgetDimension
-    metric: WidgetMetric
+class WidgetQueryFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     transaction_type: TransactionType | None = None
-    granularity: WidgetGranularity | None = None
     account_id: int | None = None
 
 
-class DashboardWidgetCreate(DashboardWidgetFields):
+class WidgetQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    dimension: WidgetDimension
+    metric: WidgetMetric
+    filters: WidgetQueryFilters = Field(default_factory=WidgetQueryFilters)
+    granularity: WidgetGranularity | None = None
 
-class DashboardWidgetRead(DashboardWidgetFields):
-    """Built explicitly in the service (not via model_validate on the ORM
-    row) — `data` isn't a column, it's the Diagram's freshly computed output,
-    joined on at read time."""
 
-    id: int
-    sort_order: int
+class WidgetVisualization(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: WidgetType
+    options: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=20)
+
+
+class DashboardWidgetConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=100)
+    data_source: str = Field(min_length=1, max_length=50)
+    data_spec: str = Field(min_length=1, max_length=80)
+    query: WidgetQuery
+    visualization: WidgetVisualization
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("title must not be blank")
+        return value.strip()
+
+
+class DashboardConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Annotated[int, Field(ge=1)]
+    widgets: list[DashboardWidgetConfig] = Field(max_length=100)
+
+    @field_validator("schema_version")
+    @classmethod
+    def supported_schema_version(cls, value: int) -> int:
+        if value != 1:
+            raise ValueError("unsupported dashboard schema_version")
+        return value
+
+    @model_validator(mode="after")
+    def ids_must_be_unique(self):
+        ids = [widget.id for widget in self.widgets]
+        if len(ids) != len(set(ids)):
+            raise ValueError("widget ids must be unique")
+        return self
+
+
+class DashboardWidgetDataRead(BaseModel):
+    id: str
     data: DiagramDataRead
+
+
+class DashboardWidgetsResponse(BaseModel):
+    config: DashboardConfig
+    widgets: list[DashboardWidgetDataRead]

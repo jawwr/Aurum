@@ -5,6 +5,7 @@ thresholds consumed by services/insights_service.py."""
 from decimal import Decimal
 
 from sqlalchemy import Integer, Numeric, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -29,3 +30,8 @@ class AppSettings(Base):
     # working. In the app's display currency (see `currency` above).
     idle_cash_threshold_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("1000"))
     idle_cash_threshold_days: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    # Singleton Dashboard configuration; calculated widget data is never
+    # persisted here.
+    dashboard_config: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=lambda: {"schema_version": 1, "widgets": []}
+    )
