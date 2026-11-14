@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, type LucideIcon } from "lucide-react";
+import { BarChart3, List as ListIcon, LineChart as LineChartIcon, PieChart as PieChartIcon, type LucideIcon } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useWidgetTypes } from "@/hooks/useDashboardWidgets";
 import { useTranslation, type TranslationKey } from "@/lib/i18n";
-import { getWidgetCapabilities } from "@/api/dashboardWidgets";
+import { filterAvailability, getWidgetCapabilities, withoutForbiddenMetrics } from "@/api/dashboardWidgets";
+import { DEFAULT_LIST_LIMIT, DEFAULT_LIST_SORT, readListOptions } from "@/lib/dashboardConfig";
 import type {
   DashboardWidgetConfig,
   DashboardWidgetInput,
@@ -14,6 +15,7 @@ import type {
   WidgetDimension,
   WidgetGranularity,
   WidgetMetric,
+  WidgetSort,
   WidgetType,
 } from "@/types";
 
@@ -24,7 +26,7 @@ interface AddWidgetModalProps {
   onSubmit: (input: DashboardWidgetInput) => void;
 }
 
-const CHART_TYPE_ICONS: Record<WidgetType, LucideIcon> = { pie: PieChartIcon, bar: BarChart3, line: LineChartIcon };
+const CHART_TYPE_ICONS: Record<WidgetType, LucideIcon> = { pie: PieChartIcon, bar: BarChart3, line: LineChartIcon, list: ListIcon };
 
 const EMPTY_FORM = {
   chartType: null as WidgetType | null,
@@ -34,6 +36,9 @@ const EMPTY_FORM = {
   transactionType: "" as TransactionType | "",
   granularity: "" as WidgetGranularity | "",
   accountId: "",
+  // List-only settings — mirror the backend ListDiagram defaults.
+  sort: DEFAULT_LIST_SORT as WidgetSort,
+  limit: String(DEFAULT_LIST_LIMIT),
 };
 
 /** Progressive disclosure, not a literal multi-step wizard: pick a chart
@@ -56,6 +61,8 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
   const [transactionType, setTransactionType] = useState(EMPTY_FORM.transactionType);
   const [granularity, setGranularity] = useState(EMPTY_FORM.granularity);
   const [accountId, setAccountId] = useState(EMPTY_FORM.accountId);
+  const [sort, setSort] = useState(EMPTY_FORM.sort);
+  const [limit, setLimit] = useState(EMPTY_FORM.limit);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,6 +76,9 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
        setTransactionType(widget.query.filters.transaction_type ?? "");
        setGranularity(widget.query.granularity ?? "");
        setAccountId(widget.query.filters.account_id ? String(widget.query.filters.account_id) : "");
+       const listOptions = readListOptions(widget.visualization.options);
+       setSort(listOptions.sort);
+       setLimit(String(listOptions.limit));
     } else {
       setDataSource("");
       setChartType(EMPTY_FORM.chartType);
@@ -78,6 +88,8 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
       setTransactionType(EMPTY_FORM.transactionType);
       setGranularity(EMPTY_FORM.granularity);
       setAccountId(EMPTY_FORM.accountId);
+      setSort(EMPTY_FORM.sort);
+      setLimit(EMPTY_FORM.limit);
     }
     setError(null);
   }, [open, widget]);
@@ -98,13 +110,26 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
   const chartTypes = (widgetTypes?.diagrams ?? [])
     .filter((entry) => getCapabilities(entry.type))
     .map((entry) => entry.type);
-  const requiredParameters = [
-    ...(capabilities?.spec.required_parameters ?? []),
-    ...(capabilities?.spec.required_by_dimension[dimension] ?? []),
-  ];
-  const needsTransactionType = requiredParameters.includes("transaction_type");
-  const needsGranularity = requiredParameters.includes("granularity");
+  // Filter visibility is derived from the manifest, same as the metric
+  // options: "required" (backend rejects the widget without it) renders a
+  // mandatory select, "optional" (the dimension accepts it but doesn't
+  // require it) renders a mandatory select, "optional" renders a select with
+  // an "all" choice sent as null, and "hidden" (forbidden or unsupported)
+  // renders nothing.
+  const transactionTypeMode = capabilities
+    ? filterAvailability(capabilities.spec, "transaction_type", dimension)
+    : "hidden";
+  const granularityMode = capabilities ? filterAvailability(capabilities.spec, "granularity", dimension) : "hidden";
+  const needsTransactionType = transactionTypeMode === "required";
+  const supportsTransactionType = Boolean(dimension) && transactionTypeMode !== "hidden";
+  const needsGranularity = granularityMode === "required";
   const supportsAccountFilter = capabilities?.spec.filters.includes("account_id") ?? false;
+  // Some dimensions can't use every metric ("item" rows carry their own
+  // amount — count would always be 1) — the manifest says which, so the
+  // picker never offers a pair the backend would reject. withoutForbiddenMetrics
+  // also tolerates a manifest cached from an older backend that predates the
+  // field, which would otherwise crash the whole page on chart-type select.
+  const metricOptions = withoutForbiddenMetrics(capabilities?.metrics ?? [], capabilities?.spec, dimension);
 
   function handleClose() {
     onClose();
@@ -114,10 +139,13 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
     setChartType(type);
     // A dimension/metric valid for the previous type may not be valid for
     // the new one (Line only ever offers "total") — clear rather than carry
-    // over a now-invalid selection.
+    // over a now-invalid selection. List settings reset to their defaults
+    // so switching to a list never inherits a stale sort/limit.
     setDimension("");
     setMetric("");
     setGranularity("");
+    setSort(EMPTY_FORM.sort);
+    setLimit(EMPTY_FORM.limit);
     setError(null);
   }
 
@@ -125,7 +153,7 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
     event.preventDefault();
     setError(null);
     if (!chartType || !dimension || !metric || !capabilities) return;
-    if (!capabilities.dimensions.includes(dimension) || !capabilities.metrics.includes(metric)) return;
+    if (!capabilities.dimensions.includes(dimension) || !metricOptions.includes(metric)) return;
     if (!title.trim()) {
       setError(t("dashboard.widgets.errorTitle"));
       return;
@@ -138,6 +166,12 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
       setError(t("dashboard.widgets.errorGranularity"));
       return;
     }
+    const parsedLimit = Number(limit);
+    const limitIsValid = Number.isInteger(parsedLimit) && parsedLimit >= 1;
+    if (chartType === "list" && !limitIsValid) {
+      setError(t("dashboard.widgets.errorLimit"));
+      return;
+    }
 
     const payload: DashboardWidgetInput = {
       data_source: capabilities.data_source,
@@ -146,9 +180,13 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
       title: title.trim(),
       dimension: dimension as WidgetDimension,
       metric: metric as WidgetMetric,
-      transaction_type: needsTransactionType ? (transactionType as TransactionType) : null,
+      transaction_type: supportsTransactionType && transactionType
+        ? (transactionType as TransactionType)
+        : null,
       granularity: needsGranularity ? (granularity as WidgetGranularity) : null,
       account_id: supportsAccountFilter && accountId ? Number(accountId) : null,
+      sort: chartType === "list" ? sort : null,
+      limit: chartType === "list" && limitIsValid ? parsedLimit : null,
     };
     onSubmit(payload);
     handleClose();
@@ -174,6 +212,8 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
               setTransactionType("");
               setGranularity("");
               setAccountId("");
+              setSort(EMPTY_FORM.sort);
+              setLimit(EMPTY_FORM.limit);
               setError(null);
             }}
             required
@@ -185,7 +225,7 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
         </div>
         <div>
           <Label>{t("dashboard.widgets.chartTypeLabel")}</Label>
-          <div className="mt-1.5 grid grid-cols-3 gap-2">
+          <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {chartTypes.map((type) => {
               const Icon = CHART_TYPE_ICONS[type];
               const selected = chartType === type;
@@ -226,7 +266,16 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
               <Select
                 id="widget-dimension"
                 value={dimension}
-                onChange={(event) => setDimension(event.target.value as WidgetDimension)}
+                onChange={(event) => {
+                  const nextDimension = event.target.value as WidgetDimension;
+                  setDimension(nextDimension);
+                  // A metric valid for the previous dimension can be
+                  // forbidden for the new one ("transaction" only supports
+                  // sum) — clear rather than submit an invalid pair.
+                  if (metric && withoutForbiddenMetrics([metric], capabilities?.spec, nextDimension).length === 0) {
+                    setMetric("");
+                  }
+                }}
                 required
               >
                 <option value="" disabled>
@@ -251,7 +300,7 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
                 <option value="" disabled>
                   {t("dashboard.widgets.metricLabel")}
                 </option>
-                {capabilities.metrics.map((m) => (
+                {metricOptions.map((m) => (
                   <option key={m} value={m}>
                     {t(`dashboard.widgets.metric.${m}` as TranslationKey)}
                   </option>
@@ -259,17 +308,17 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
               </Select>
             </div>
 
-            {needsTransactionType && (
+            {supportsTransactionType && (
               <div>
                 <Label htmlFor="widget-transaction-type">{t("dashboard.widgets.transactionTypeLabel")}</Label>
                 <Select
                   id="widget-transaction-type"
                   value={transactionType}
                   onChange={(event) => setTransactionType(event.target.value as TransactionType)}
-                  required
+                  required={needsTransactionType}
                 >
-                  <option value="" disabled>
-                    {t("dashboard.widgets.transactionTypeLabel")}
+                  <option value="" disabled={needsTransactionType}>
+                    {t(needsTransactionType ? "dashboard.widgets.transactionTypeLabel" : "dashboard.widgets.allTransactionTypesOption")}
                   </option>
                   {(capabilities.spec.filter_options.transaction_type ?? []).map((type) => (
                     <option key={type} value={type}>{t(`transactions.${type}` as TranslationKey)}</option>
@@ -309,6 +358,37 @@ export function AddWidgetModal({ open, onClose, widget, onSubmit }: AddWidgetMod
                   ))}
                 </Select>
               </div>
+            )}
+
+            {chartType === "list" && (
+              <>
+                <div>
+                  <Label htmlFor="widget-sort">{t("dashboard.widgets.sortLabel")}</Label>
+                  <Select
+                    id="widget-sort"
+                    value={sort}
+                    onChange={(event) => setSort(event.target.value as WidgetSort)}
+                  >
+                    {(["none", "value_asc", "value_desc"] as const).map((option) => (
+                      <option key={option} value={option}>
+                        {t(`dashboard.widgets.sort.${option}` as TranslationKey)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="widget-limit">{t("dashboard.widgets.limitLabel")}</Label>
+                  <Input
+                    id="widget-limit"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={limit}
+                    onChange={(event) => setLimit(event.target.value)}
+                    required
+                  />
+                </div>
+              </>
             )}
           </>
         )}

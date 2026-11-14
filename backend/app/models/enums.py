@@ -63,19 +63,24 @@ class WidgetType(str, enum.Enum):
     PIE = "pie"
     BAR = "bar"
     LINE = "line"
+    LIST = "list"
 
 
 class WidgetDimension(str, enum.Enum):
     """What a widget breaks its totals down by. TOTAL means "no breakdown,
     one line" — exclusive to WidgetType.LINE, where a per-category/account/tag
     breakdown would mean multiple series, not supported yet (see
-    services/data_sources.py's TransactionAnalyticsDataSpec)."""
+    services/data_sources.py's TransactionAnalyticsDataSpec). ITEM means
+    "no grouping" — one row per source item, whatever the source's items
+    are (transactions for the transactions source); only the sum metric is
+    meaningful there, a single row has no group to count."""
 
     CATEGORY = "category"
     SUBCATEGORY = "subcategory"
     ACCOUNT = "account"
     TAG = "tag"
     TYPE = "type"
+    ITEM = "item"
     TOTAL = "total"
 
 

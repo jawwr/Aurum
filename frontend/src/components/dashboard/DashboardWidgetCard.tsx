@@ -1,6 +1,7 @@
 import { Bar, BarChart, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { Pencil, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { WidgetListBody } from "@/components/dashboard/WidgetListBody";
 import { formatCurrency, getIntlLocale } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import type { DashboardWidget, WidgetGranularity, WidgetMetric } from "@/types";
@@ -114,6 +115,11 @@ export function DashboardWidgetCard({ widget, onEdit, onDelete }: DashboardWidge
       <CardContent>
         {!hasData ? (
           <p className="py-10 text-center text-sm text-text-muted">{t("dashboard.widgets.noData")}</p>
+        ) : widget.type === "list" ? (
+          // A list is not a chart: rows flow top-to-bottom in a table-like
+          // body (see WidgetListBody) instead of the fixed-height Recharts
+          // area every diagram type uses.
+          <WidgetListBody points={widget.data.points} metric={widget.metric} />
         ) : (
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">

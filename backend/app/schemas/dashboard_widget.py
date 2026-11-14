@@ -32,6 +32,7 @@ class DataSpecManifestEntry(BaseModel):
     dimension_kinds: dict[str, DatasetKind]
     required_by_dimension: dict[str, list[str]]
     forbidden_by_dimension: dict[str, list[str]]
+    forbidden_metrics_by_dimension: dict[str, list[str]]
     filter_options: dict[str, list[str]]
     compatible_diagrams: list[WidgetType]
 
@@ -69,6 +70,16 @@ class WidgetQuery(BaseModel):
     metric: WidgetMetric
     filters: WidgetQueryFilters = Field(default_factory=WidgetQueryFilters)
     granularity: WidgetGranularity | None = None
+
+    @field_validator("dimension", mode="before")
+    @classmethod
+    def legacy_transaction_dimension(cls, value):
+        # "transaction" was the pre-release name of the item dimension.
+        # Dashboards saved during that iteration still load through this
+        # alias; the next save persists the canonical "item" instead.
+        if value == "transaction":
+            return "item"
+        return value
 
 
 class WidgetVisualization(BaseModel):

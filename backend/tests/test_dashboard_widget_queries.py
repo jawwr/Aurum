@@ -11,7 +11,7 @@ from app.models.enums import CategoryKind, TransactionType
 from app.models.tag import Tag
 from app.models.transaction import Transaction, TransactionSplit
 from app.services.data_sources import get_data_source
-from app.services.diagrams import LineDiagram
+from app.services.diagrams import LineDiagram, ListDiagram
 
 
 @pytest_asyncio.fixture
@@ -138,6 +138,123 @@ async def test_time_buckets_filter_transactions_before_aggregation(
         assert [point.label for point in points] == labels
         assert [point.value for point in points] == values
         assert all(point.series_key == "total" and point.element_id is None for point in points)
+
+
+async def test_transaction_dimension_lists_unaggregated_rows_newest_first(test_sessionmaker, analytics_rows):
+    rows = analytics_rows
+    async with test_sessionmaker() as session:
+        dataset = await _spec(rows, "item").fetch(session)
+        assert dataset.kind == "categorical"
+        # Newest first (date desc, then id desc); each row is one whole
+        # transaction — its own amount, not an aggregate.
+        assert [(item.element_id, item.value) for item in dataset.items] == [
+            (3, Decimal("30")),  # Aug 31
+            (2, Decimal("50")),  # Aug 1 split — no category of its own
+            (1, Decimal("10")),  # Aug 1 leaf-category transaction
+        ]
+        assert all(item.name == "Analytics regression" for item in dataset.items)
+        assert all(item.key == f"transaction:{item.element_id}" for item in dataset.items)
+        # Category metadata rides along when the transaction has a category;
+        # the split's null category stays null (no invented icon/color).
+        assert (dataset.items[0].icon, dataset.items[0].color) == ("ShoppingBasket", rows["parent_color"])
+        assert (dataset.items[1].icon, dataset.items[1].color) == (None, None)
+        assert (dataset.items[2].icon, dataset.items[2].color) == ("Candy", "#abcdef")
+        assert (await _spec(rows, "item", account_id=-1).fetch(session)).items == []
+
+
+async def test_item_dimension_type_filter_is_optional_and_applies_before_listing(
+    test_sessionmaker, analytics_rows,
+):
+    rows = analytics_rows
+    async with test_sessionmaker() as session:
+        all_types = await _spec(rows, "item", transaction_type=None).fetch(session)
+        # Income (1000) and the transfer (7) join the listing when no type
+        # filter is set, still newest-first within each date.
+        assert [item.value for item in all_types.items] == [
+            Decimal("30"),  # Aug 31 expense
+            Decimal("7"),  # Aug 1 transfer (id 8)
+            Decimal("1000"),  # Aug 1 income (id 7)
+            Decimal("50"),  # Aug 1 split (id 2)
+            Decimal("10"),  # Aug 1 expense (id 1)
+        ]
+        income_only = await _spec(rows, "item", transaction_type="income").fetch(session)
+        assert [item.value for item in income_only.items] == [Decimal("1000")]
+
+
+async def test_grouped_dimensions_accept_all_transaction_types_before_aggregation(test_sessionmaker, analytics_rows):
+    async with test_sessionmaker() as session:
+        dataset = await _spec(analytics_rows, "category", transaction_type=None, account_id=None).fetch(session)
+        assert {item.name: item.value for item in dataset.items} == {
+            "Groceries": Decimal("90"),
+            "Salary": Decimal("1000"),
+        }
+        subcategories = await _spec(analytics_rows, "subcategory", "count", transaction_type=None).fetch(session)
+        assert {item.name: item.value for item in subcategories.items} == {
+            "Groceries": 2, "Leaf": 2, "Salary": 1,
+        }
+        account = await _spec(analytics_rows, "account", transaction_type=None).fetch(session)
+        assert {item.name: item.value for item in account.items} == {
+            "Selected": Decimal("1097"), "Other": Decimal("100"),
+        }
+        totals = await _spec(analytics_rows, "total", transaction_type=None, granularity="month").fetch(session)
+        assert totals.items[0].value == Decimal("1197")
+        transfers = await _spec(analytics_rows, "item", transaction_type="transfer").fetch(session)
+        assert [item.value for item in transfers.items] == [Decimal("7")]
+
+
+async def test_list_diagram_sorts_item_rows_both_directions(test_sessionmaker, analytics_rows):
+    rows = analytics_rows
+    async with test_sessionmaker() as session:
+        dataset = await _spec(rows, "item", transaction_type=None).fetch(session)
+    ascending = ListDiagram(sort="value_asc").render(dataset)
+    assert [point.value for point in ascending.points] == [
+        Decimal("7"), Decimal("10"), Decimal("30"), Decimal("50"), Decimal("1000"),
+    ]
+    top_two = ListDiagram(sort="value_desc", limit=2).render(dataset)
+    assert [point.value for point in top_two.points] == [Decimal("1000"), Decimal("50")]
+
+
+async def test_list_data_spec_preserves_transaction_signs_for_sum(test_sessionmaker, analytics_rows):
+    async with test_sessionmaker() as session:
+        dataset = await _spec(analytics_rows, "item", transaction_type=None, signed_amounts=True).fetch(session)
+        assert [item.value for item in dataset.items] == [
+            Decimal("30"), Decimal("7"), Decimal("1000"), Decimal("-50"), Decimal("-10"),
+        ]
+        categories = await _spec(
+            analytics_rows, "category", transaction_type="expense", signed_amounts=True,
+        ).fetch(session)
+        assert {item.name: item.value for item in categories.items} == {"Groceries": Decimal("-90")}
+
+
+async def test_signed_category_contributions_are_cast_and_signed_in_sql(
+    test_sessionmaker, analytics_rows,
+):
+    async with test_sessionmaker() as session:
+        dataset = await _spec(
+            analytics_rows, "category", transaction_type=None, account_id=None, signed_amounts=True,
+        ).fetch(session)
+
+        assert {item.name: item.value for item in dataset.items} == {
+            "Groceries": Decimal("-90"),
+            "Salary": Decimal("1000"),
+        }
+
+
+async def test_signed_item_values_are_sorted_by_numeric_amount_not_absolute_amount(
+    test_sessionmaker, analytics_rows,
+):
+    async with test_sessionmaker() as session:
+        dataset = await _spec(analytics_rows, "item", transaction_type=None, signed_amounts=True).fetch(session)
+
+        descending = ListDiagram(sort="value_desc").render(dataset).points
+        ascending = ListDiagram(sort="value_asc").render(dataset).points
+
+        assert [point.value for point in descending] == [
+            Decimal("1000"), Decimal("30"), Decimal("7"), Decimal("-10"), Decimal("-50"),
+        ]
+        assert [point.value for point in ascending] == [
+            Decimal("-50"), Decimal("-10"), Decimal("7"), Decimal("30"), Decimal("1000"),
+        ]
 
 
 @pytest.mark.parametrize("metric,value", [("sum", 90), ("count", 3)])

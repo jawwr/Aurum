@@ -6,11 +6,20 @@ import {
   formatSignedCurrency,
   formatTransactionDate,
   getIntlLocale,
+  getValueColor,
   getMonthLabels,
   maskAmount,
   pluralizeRu,
   trimTrailingZeros,
 } from "@/lib/format";
+
+describe("getValueColor", () => {
+  it("maps negative, positive, and zero values to semantic colors", () => {
+    expect(getValueColor(-1)).toBe("var(--danger)");
+    expect(getValueColor(1)).toBe("var(--success)");
+    expect(getValueColor(0)).toBe("var(--text-muted)");
+  });
+});
 
 describe("getIntlLocale", () => {
   it("maps ru to ru-RU and en to en-US", () => {

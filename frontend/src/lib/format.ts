@@ -62,6 +62,12 @@ export function formatSignedCurrency(amount: number | string, currency: string =
   return `${sign}${formatCurrency(value, currency)}`;
 }
 
+/** Semantic color for a signed numeric value. */
+export function getValueColor(value: number | string): string {
+  const numericValue = typeof value === "string" ? Number(value) : value;
+  return numericValue < 0 ? "var(--danger)" : numericValue > 0 ? "var(--success)" : "var(--text-muted)";
+}
+
 /** "Hide balance" masking — wraps an already-formatted amount (currency,
  * quantity, whatever reveals a dollar figure) rather than reformatting it,
  * so call sites don't need a separate hidden-vs-shown branch for every
