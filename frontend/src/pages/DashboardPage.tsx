@@ -1,87 +1,147 @@
-import { MonthSelector } from "@/components/layout/MonthSelector";
-import { YearSelector } from "@/components/layout/YearSelector";
-import { StatCard } from "@/components/dashboard/StatCard";
-import { SpendingByCategoryCard } from "@/components/dashboard/SpendingByCategoryCard";
-import { RecentTransactionsCard } from "@/components/dashboard/RecentTransactionsCard";
-import { AlertBanner } from "@/components/insights/AlertBanner";
-import { useDashboardSummary } from "@/hooks/useDashboard";
-import { usePageParams } from "@/hooks/usePageParams";
-import { useTransactionYears } from "@/hooks/useTransactions";
-import { formatCurrency, formatSignedCurrency } from "@/lib/format";
-import { useTranslation } from "@/lib/i18n";
-import { monthParam, yearParam } from "@/lib/pageParams";
+import {useState} from "react";
+import {MonthSelector} from "@/components/layout/MonthSelector";
+import {YearSelector} from "@/components/layout/YearSelector";
+import {Plus} from "lucide-react";
+import {Button} from "@/components/ui/Button";
+import {StatCard} from "@/components/dashboard/StatCard";
+import {SpendingByCategoryCard} from "@/components/dashboard/SpendingByCategoryCard";
+import {RecentTransactionsCard} from "@/components/dashboard/RecentTransactionsCard";
+import {DashboardWidgetCard} from "@/components/dashboard/DashboardWidgetCard";
+import {AddWidgetModal} from "@/components/dashboard/AddWidgetModal";
+import {AlertBanner} from "@/components/insights/AlertBanner";
+import {useDashboardSummary} from "@/hooks/useDashboard";
+import {usePageParams} from "@/hooks/usePageParams";
+import {useTransactionYears} from "@/hooks/useTransactions";
+import {useDashboardWidgets, useDeleteDashboardWidget} from "@/hooks/useDashboardWidgets";
+import {formatCurrency, formatSignedCurrency} from "@/lib/format";
+import {useTranslation} from "@/lib/i18n";
+import {monthParam, yearParam} from "@/lib/pageParams";
+import type {DashboardWidget} from "@/types";
 
 // Query params mirror what the summary request sends; also kept in localStorage.
-const PARAM_SCHEMA = { year: yearParam(), month: monthParam() };
+const PARAM_SCHEMA = {year: yearParam(), month: monthParam()};
 
 /** Share of income left over after spending (net / real_income). `null` when
  * there was no income to take a share of, rather than a misleading 0%. */
 function savingsRate(realIncome: number, net: number): number | null {
-  return realIncome > 0 ? (net / realIncome) * 100 : null;
+    return realIncome > 0 ? (net / realIncome) * 100 : null;
 }
 
 function formatPercent(value: number): string {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(0)}%`;
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${value.toFixed(0)}%`;
 }
 
 export function DashboardPage() {
-  const { t } = useTranslation();
-  const now = new Date();
-  const [{ year, month }, setParams] = usePageParams("dashboard", PARAM_SCHEMA);
-  const { data: years } = useTransactionYears();
+    const {t} = useTranslation();
+    const now = new Date();
+    const [{year, month}, setParams] = usePageParams("dashboard", PARAM_SCHEMA);
+    const {data: years} = useTransactionYears();
 
-  const { data, isLoading, isError } = useDashboardSummary(year, month);
-  const rate = data ? savingsRate(Number(data.real_income), Number(data.net)) : null;
+    const {data, isLoading, isError} = useDashboardSummary(year, month);
+    const rate = data ? savingsRate(Number(data.real_income), Number(data.net)) : null;
 
-  return (
-    <div className="space-y-5">
-      <AlertBanner excludeKeys={["risky_allocation_exceeded"]} />
+    const [widgetModalOpen, setWidgetModalOpen] = useState(false);
+    const [editingWidget, setEditingWidget] = useState<DashboardWidget | null>(null);
+    const {data: widgets} = useDashboardWidgets(year, month);
+    const deleteWidget = useDeleteDashboardWidget();
 
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <MonthSelector month={month} onChange={(value) => setParams({ month: value })} />
+    function openCreateWidgetModal() {
+        setEditingWidget(null);
+        setWidgetModalOpen(true);
+    }
+
+    function openEditWidgetModal(widget: DashboardWidget) {
+        setEditingWidget(widget);
+        setWidgetModalOpen(true);
+    }
+
+    function handleDeleteWidget(widget: DashboardWidget) {
+        if (window.confirm(t("dashboard.widgets.confirmDelete", {title: widget.title}))) {
+            deleteWidget.mutate(widget.id);
+        }
+    }
+
+    return (
+        <div className="space-y-5">
+            <AlertBanner excludeKeys={["risky_allocation_exceeded"]}/>
+
+            <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                    <MonthSelector month={month} onChange={(value) => setParams({month: value})}/>
+                </div>
+                <YearSelector years={years ?? [now.getFullYear()]} year={year}
+                              onChange={(value) => setParams({year: value})}/>
+            </div>
+
+            {isError && (
+                <p className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+                    {t("dashboard.errorLoading")}
+                </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+                <StatCard
+                    label={t("dashboard.statRealIncomeLabel")}
+                    value={isLoading ? "…" : formatCurrency(data?.real_income ?? 0)}
+                    caption={t("dashboard.statRealIncomeCaption")}
+                    tone="success"
+                />
+                <StatCard
+                    label={t("dashboard.statSpentLabel")}
+                    value={isLoading ? "…" : formatCurrency(data?.spent ?? 0)}
+                    caption={t("dashboard.statSpentCaption")}
+                    tone="danger"
+                />
+                <StatCard
+                    label={t("dashboard.statNetLabel")}
+                    value={isLoading ? "…" : formatSignedCurrency(data?.net ?? 0)}
+                    caption={t("dashboard.statNetCaption")}
+                    tone={Number(data?.net ?? 0) >= 0 ? "success" : "danger"}
+                />
+                <StatCard
+                    label={t("dashboard.statSavingsRateLabel")}
+                    value={isLoading ? "…" : rate === null ? "—" : formatPercent(rate)}
+                    caption={t("dashboard.statSavingsRateCaption")}
+                    tone={rate === null ? "default" : rate >= 0 ? "success" : "danger"}
+                />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
+                <SpendingByCategoryCard items={data?.spending_by_category ?? []}/>
+                <RecentTransactionsCard year={year} month={month}/>
+            </div>
+
+            <div className="flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                    {t("dashboard.widgets.sectionTitle")}
+                </h2>
+                <Button variant="secondary" onClick={openCreateWidgetModal}>
+                    <Plus size={16}/>
+                    {t("dashboard.widgets.addButton")}
+                </Button>
+            </div>
+
+            {widgets && widgets.length > 0 && (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    {widgets.map((widget) => (
+                        <DashboardWidgetCard
+                            key={widget.id}
+                            widget={widget}
+                            onEdit={openEditWidgetModal}
+                            onDelete={handleDeleteWidget}
+                        />
+                    ))}
+                </div>
+            )}
+
+            <AddWidgetModal
+                open={widgetModalOpen}
+                onClose={() => setWidgetModalOpen(false)}
+                year={year}
+                month={month}
+                widget={editingWidget}
+            />
         </div>
-        <YearSelector years={years ?? [now.getFullYear()]} year={year} onChange={(value) => setParams({ year: value })} />
-      </div>
-
-      {isError && (
-        <p className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          {t("dashboard.errorLoading")}
-        </p>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatCard
-          label={t("dashboard.statRealIncomeLabel")}
-          value={isLoading ? "…" : formatCurrency(data?.real_income ?? 0)}
-          caption={t("dashboard.statRealIncomeCaption")}
-          tone="success"
-        />
-        <StatCard
-          label={t("dashboard.statSpentLabel")}
-          value={isLoading ? "…" : formatCurrency(data?.spent ?? 0)}
-          caption={t("dashboard.statSpentCaption")}
-          tone="danger"
-        />
-        <StatCard
-          label={t("dashboard.statNetLabel")}
-          value={isLoading ? "…" : formatSignedCurrency(data?.net ?? 0)}
-          caption={t("dashboard.statNetCaption")}
-          tone={Number(data?.net ?? 0) >= 0 ? "success" : "danger"}
-        />
-        <StatCard
-          label={t("dashboard.statSavingsRateLabel")}
-          value={isLoading ? "…" : rate === null ? "—" : formatPercent(rate)}
-          caption={t("dashboard.statSavingsRateCaption")}
-          tone={rate === null ? "default" : rate >= 0 ? "success" : "danger"}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
-        <SpendingByCategoryCard items={data?.spending_by_category ?? []} />
-        <RecentTransactionsCard year={year} month={month} />
-      </div>
-    </div>
-  );
+    );
 }
