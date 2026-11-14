@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.schemas.dashboard_widget import DashboardWidgetCreate, DashboardWidgetRead, WidgetTypeManifestEntry
+from app.schemas.dashboard_widget import DashboardWidgetCreate, DashboardWidgetManifest, DashboardWidgetRead
 from app.services.dashboard_widget_service import (
     create_widget,
     delete_widget,
@@ -16,11 +16,9 @@ from app.services.dashboard_widget_service import (
 router = APIRouter(prefix="/dashboard/widgets", tags=["dashboard-widgets"])
 
 
-@router.get("/types", response_model=list[WidgetTypeManifestEntry])
-def read_widget_types() -> list[WidgetTypeManifestEntry]:
-    """Drives the "Add widget" form's dimension/metric pickers straight from
-    what the Diagram subclasses actually accept (services/diagrams.py),
-    instead of a second hand-kept list on the frontend that could drift."""
+@router.get("/types", response_model=DashboardWidgetManifest)
+def read_widget_types() -> DashboardWidgetManifest:
+    """Return data-source and diagram capabilities from backend registries."""
     return list_widget_types()
 
 

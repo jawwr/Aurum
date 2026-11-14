@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from app.models.enums import TransactionType, WidgetDimension, WidgetMetric
 from app.models.transaction import Transaction, TransactionSplit
 from app.services.category_rollup import raw_category_contributions, rollup_spending_by_top_level_category
+from app.services.data_sources import DATA_SOURCE_REGISTRY
 from app.services.diagrams import BarDiagram, PieDiagram
 
 
@@ -69,11 +70,19 @@ async def test_category_widget_account_filter(
     account_id, _ = category_transactions
     async with test_sessionmaker() as session:
         for account_filter, expected in [(account_id, selected), (None, all_accounts), (-1, {})]:
-            diagram = diagram_cls(
-                dimension=dimension, metric=metric, transaction_type=TransactionType.EXPENSE,
-                granularity=None, account_id=account_filter, start=date(2026, 8, 1), end=date(2026, 8, 31),
+            spec = DATA_SOURCE_REGISTRY["transactions"].create_spec(
+                "analytics",
+                config={
+                    "dimension": dimension,
+                    "metric": metric,
+                    "transaction_type": TransactionType.EXPENSE,
+                    "granularity": None,
+                    "account_id": account_filter,
+                    "start_date": date(2026, 8, 1),
+                    "end_date": date(2026, 8, 31),
+                },
             )
-            data = await diagram.fetch(session)
+            data = diagram_cls().render(await spec.fetch(session))
             assert {point.label: point.value for point in data.points} == expected
 
 

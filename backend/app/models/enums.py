@@ -58,8 +58,7 @@ class CryptoTransactionType(str, enum.Enum):
 
 
 class WidgetType(str, enum.Enum):
-    """Chart shape a dashboard widget renders as — see
-    services/diagrams.py's Diagram subclasses, one per member here."""
+    """Chart shape a dashboard widget renders as — see the Diagram registry."""
 
     PIE = "pie"
     BAR = "bar"
@@ -70,7 +69,7 @@ class WidgetDimension(str, enum.Enum):
     """What a widget breaks its totals down by. TOTAL means "no breakdown,
     one line" — exclusive to WidgetType.LINE, where a per-category/account/tag
     breakdown would mean multiple series, not supported yet (see
-    services/diagrams.py)."""
+    services/data_sources.py's TransactionAnalyticsDataSpec)."""
 
     CATEGORY = "category"
     SUBCATEGORY = "subcategory"

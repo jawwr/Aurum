@@ -11,7 +11,11 @@ import type { DashboardWidgetInput } from "@/types";
 // Static per session (doesn't depend on year/month, rarely changes) — one
 // fetch is enough, react-query's default caching handles the rest.
 export function useWidgetTypes() {
-  return useQuery({ queryKey: ["dashboard-widget-types"], queryFn: fetchWidgetTypes });
+  return useQuery({
+    queryKey: ["dashboard-widget-types", "data-architecture"],
+    queryFn: fetchWidgetTypes,
+    staleTime: Infinity,
+  });
 }
 
 export function useDashboardWidgets(year: number, month: number) {

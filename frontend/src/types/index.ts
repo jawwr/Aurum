@@ -202,24 +202,56 @@ export type WidgetDimension = "category" | "subcategory" | "account" | "tag" | "
 export type WidgetMetric = "sum" | "count";
 export type WidgetGranularity = "day" | "week" | "month";
 
+export interface DataSpecManifestEntry {
+  id: string;
+  dimensions: string[];
+  metrics: string[];
+  filters: string[];
+  required_parameters: string[];
+  dimension_kinds: Record<string, "categorical" | "time_series">;
+  required_by_dimension: Record<string, string[]>;
+  forbidden_by_dimension: Record<string, string[]>;
+  filter_options: Record<string, string[]>;
+  compatible_diagrams: WidgetType[];
+}
+
+export interface DataSourceManifestEntry {
+  id: string;
+  specifications: DataSpecManifestEntry[];
+}
+
 // One entry per WidgetType — drives the "Add widget" form's dimension/metric
 // pickers straight from what the backend actually accepts, instead of a
 // second hand-kept list here that could drift out of sync.
 export interface WidgetTypeManifestEntry {
   type: WidgetType;
-  allowed_dimensions: WidgetDimension[];
-  allowed_metrics: WidgetMetric[];
+  dataset_kind: "categorical" | "time_series";
+  allowed_dimensions: string[];
+  allowed_metrics: string[];
   needs_granularity: boolean;
+  compatible_data_specs: string[];
+}
+
+export interface DashboardWidgetManifest {
+  data_sources: DataSourceManifestEntry[];
+  diagrams: WidgetTypeManifestEntry[];
 }
 
 export interface DiagramPoint {
   label: string;
   value: string;
   color: string | null;
+  element_id: string | number | null;
+  key: string;
+  icon: string | null;
+  time_bucket: string | null;
+  series_key: string | null;
 }
 
 export interface DashboardWidget {
   id: number;
+  data_source: string;
+  data_spec: string;
   type: WidgetType;
   title: string;
   dimension: WidgetDimension;
@@ -232,6 +264,8 @@ export interface DashboardWidget {
 }
 
 export interface DashboardWidgetInput {
+  data_source: string;
+  data_spec: string;
   type: WidgetType;
   title: string;
   dimension: WidgetDimension;
@@ -617,4 +651,3 @@ export interface AppSettings {
    * from /api/health, which is served without auth. */
   app_version: string;
 }
-

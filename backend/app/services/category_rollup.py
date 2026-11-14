@@ -76,7 +76,7 @@ async def raw_category_contributions(
     (category_id NULL, 2+ splits), enforced at write time.
 
     Public (not just used by rollup_spending_by_top_level_category below):
-    services/diagrams.py's SUBCATEGORY dimension wants these leaf-level
+    TransactionAnalyticsDataSpec's subcategory dimension wants these leaf-level
     contributions as-is, without the parent rollup this module otherwise
     exists for."""
     plain_stmt = select(Transaction.id, Transaction.category_id, Transaction.amount).where(

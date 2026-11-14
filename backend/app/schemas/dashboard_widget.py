@@ -1,33 +1,66 @@
+from datetime import date as date_
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import TransactionType, WidgetDimension, WidgetGranularity, WidgetMetric, WidgetType
+from app.services.dataset import DatasetKind
 
 
 class DiagramPointRead(BaseModel):
     label: str
     value: Decimal
     color: str | None = None
+    element_id: str | int | None = None
+    key: str
+    icon: str | None = None
+    time_bucket: date_ | None = None
+    series_key: str | None = None
 
 
 class DiagramDataRead(BaseModel):
     points: list[DiagramPointRead]
 
 
+class DataSpecManifestEntry(BaseModel):
+    id: str
+    dimensions: list[str]
+    metrics: list[str]
+    filters: list[str]
+    required_parameters: list[str]
+    dimension_kinds: dict[str, DatasetKind]
+    required_by_dimension: dict[str, list[str]]
+    forbidden_by_dimension: dict[str, list[str]]
+    filter_options: dict[str, list[str]]
+    compatible_diagrams: list[WidgetType]
+
+
+class DataSourceManifestEntry(BaseModel):
+    id: str
+    specifications: list[DataSpecManifestEntry]
+
+
 class WidgetTypeManifestEntry(BaseModel):
-    """One entry per WidgetType, so the "Add widget" form's dimension/metric
-    pickers are driven by what the backend's Diagram subclasses actually
-    accept (see services/diagrams.py) instead of a second, hand-kept list on
-    the frontend that could drift out of sync."""
+    """Backend-declared visualization capabilities and source compatibility."""
 
     type: WidgetType
-    allowed_dimensions: list[WidgetDimension]
-    allowed_metrics: list[WidgetMetric]
+    dataset_kind: DatasetKind
+    allowed_dimensions: list[str]
+    allowed_metrics: list[str]
     needs_granularity: bool
+    compatible_data_specs: list[str]
+
+
+class DashboardWidgetManifest(BaseModel):
+    data_sources: list[DataSourceManifestEntry]
+    diagrams: list[WidgetTypeManifestEntry]
 
 
 class DashboardWidgetFields(BaseModel):
+    # Defaults preserve the stored/API shape of widgets created before the
+    # source/spec split was introduced.
+    data_source: str = Field(default="transactions", min_length=1, max_length=50)
+    data_spec: str = Field(default="analytics", min_length=1, max_length=80)
     type: WidgetType
     title: str = Field(min_length=1, max_length=100)
     dimension: WidgetDimension
@@ -38,7 +71,7 @@ class DashboardWidgetFields(BaseModel):
 
 
 class DashboardWidgetCreate(DashboardWidgetFields):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 class DashboardWidgetRead(DashboardWidgetFields):

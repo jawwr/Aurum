@@ -6,6 +6,7 @@ import { Input, Label, Select } from "@/components/ui/Input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useCreateDashboardWidget, useUpdateDashboardWidget, useWidgetTypes } from "@/hooks/useDashboardWidgets";
 import { useTranslation, type TranslationKey } from "@/lib/i18n";
+import { getWidgetCapabilities } from "@/api/dashboardWidgets";
 import type {
   DashboardWidget,
   DashboardWidgetInput,
@@ -26,7 +27,6 @@ interface AddWidgetModalProps {
   widget?: DashboardWidget | null;
 }
 
-const CHART_TYPES: WidgetType[] = ["pie", "bar", "line"];
 const CHART_TYPE_ICONS: Record<WidgetType, LucideIcon> = { pie: PieChartIcon, bar: BarChart3, line: LineChartIcon };
 
 const EMPTY_FORM = {
@@ -41,8 +41,7 @@ const EMPTY_FORM = {
 
 /** Progressive disclosure, not a literal multi-step wizard: pick a chart
  * type first, then the field pickers below it appear — driven entirely by
- * that type's manifest entry (services/diagrams.py's allowed_dimensions/
- * allowed_metrics), so a dimension the backend wouldn't accept never even
+ * the backend DataSpec and compatible Dataset shape, so a dimension the backend wouldn't accept never even
  * shows up as an option. Same form for create and edit — this component
  * never unmounts (DashboardPage renders it unconditionally, Dialog just
  * hides its content), so the fields are (re)populated from `widget` in an
@@ -56,6 +55,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
   const isSaving = createWidget.isPending || updateWidget.isPending;
 
   const [chartType, setChartType] = useState(EMPTY_FORM.chartType);
+  const [dataSource, setDataSource] = useState("");
   const [title, setTitle] = useState(EMPTY_FORM.title);
   const [dimension, setDimension] = useState(EMPTY_FORM.dimension);
   const [metric, setMetric] = useState(EMPTY_FORM.metric);
@@ -67,6 +67,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
   useEffect(() => {
     if (!open) return;
     if (widget) {
+      setDataSource(widget.data_source);
       setChartType(widget.type);
       setTitle(widget.title);
       setDimension(widget.dimension);
@@ -75,6 +76,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
       setGranularity(widget.granularity ?? "");
       setAccountId(widget.account_id ? String(widget.account_id) : "");
     } else {
+      setDataSource("");
       setChartType(EMPTY_FORM.chartType);
       setTitle(EMPTY_FORM.title);
       setDimension(EMPTY_FORM.dimension);
@@ -86,8 +88,29 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
     setError(null);
   }, [open, widget]);
 
-  const manifest = widgetTypes?.find((entry) => entry.type === chartType);
-  const needsTransactionType = dimension !== "" && dimension !== "type";
+  const selectedSource = dataSource || widgetTypes?.data_sources[0]?.id || "";
+  function getCapabilities(type: WidgetType | null) {
+    const source = widgetTypes?.data_sources.find((entry) => entry.id === selectedSource);
+    const specs = source?.specifications ?? [];
+    const preferredSpec = widget?.data_source === selectedSource ? widget.data_spec : null;
+    const orderedSpecs = [...specs].sort((a, b) => Number(b.id === preferredSpec) - Number(a.id === preferredSpec));
+    for (const spec of orderedSpecs) {
+      const result = getWidgetCapabilities(widgetTypes, type, { data_source: selectedSource, data_spec: spec.id });
+      if (result) return result;
+    }
+    return null;
+  }
+  const capabilities = getCapabilities(chartType);
+  const chartTypes = (widgetTypes?.diagrams ?? [])
+    .filter((entry) => getCapabilities(entry.type))
+    .map((entry) => entry.type);
+  const requiredParameters = [
+    ...(capabilities?.spec.required_parameters ?? []),
+    ...(capabilities?.spec.required_by_dimension[dimension] ?? []),
+  ];
+  const needsTransactionType = requiredParameters.includes("transaction_type");
+  const needsGranularity = requiredParameters.includes("granularity");
+  const supportsAccountFilter = capabilities?.spec.filters.includes("account_id") ?? false;
 
   function handleClose() {
     onClose();
@@ -107,7 +130,8 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
-    if (!chartType || !dimension || !metric) return;
+    if (!chartType || !dimension || !metric || !capabilities) return;
+    if (!capabilities.dimensions.includes(dimension) || !capabilities.metrics.includes(metric)) return;
     if (!title.trim()) {
       setError(t("dashboard.widgets.errorTitle"));
       return;
@@ -116,19 +140,21 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
       setError(t("dashboard.widgets.errorTransactionType"));
       return;
     }
-    if (manifest?.needs_granularity && !granularity) {
+    if (needsGranularity && !granularity) {
       setError(t("dashboard.widgets.errorGranularity"));
       return;
     }
 
     const payload: DashboardWidgetInput = {
+      data_source: capabilities.data_source,
+      data_spec: capabilities.data_spec,
       type: chartType,
       title: title.trim(),
-      dimension,
-      metric,
+      dimension: dimension as WidgetDimension,
+      metric: metric as WidgetMetric,
       transaction_type: needsTransactionType ? (transactionType as TransactionType) : null,
-      granularity: manifest?.needs_granularity ? (granularity as WidgetGranularity) : null,
-      account_id: accountId ? Number(accountId) : null,
+      granularity: needsGranularity ? (granularity as WidgetGranularity) : null,
+      account_id: supportsAccountFilter && accountId ? Number(accountId) : null,
     };
     if (widget) {
       await updateWidget.mutateAsync({ id: widget.id, input: payload });
@@ -146,9 +172,31 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
+          <Label htmlFor="widget-data-source">{t("dashboard.widgets.dataSourceLabel")}</Label>
+          <Select
+            id="widget-data-source"
+            value={selectedSource}
+            onChange={(event) => {
+              setDataSource(event.target.value);
+              setChartType(null);
+              setDimension("");
+              setMetric("");
+              setTransactionType("");
+              setGranularity("");
+              setAccountId("");
+              setError(null);
+            }}
+            required
+          >
+            {(widgetTypes?.data_sources ?? []).map((source) => (
+              <option key={source.id} value={source.id}>{source.id}</option>
+            ))}
+          </Select>
+        </div>
+        <div>
           <Label>{t("dashboard.widgets.chartTypeLabel")}</Label>
           <div className="mt-1.5 grid grid-cols-3 gap-2">
-            {CHART_TYPES.map((type) => {
+            {chartTypes.map((type) => {
               const Icon = CHART_TYPE_ICONS[type];
               const selected = chartType === type;
               return (
@@ -170,7 +218,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
           </div>
         </div>
 
-        {manifest && (
+        {capabilities && (
           <>
             <div>
               <Label htmlFor="widget-title">{t("dashboard.widgets.titleLabel")}</Label>
@@ -194,7 +242,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
                 <option value="" disabled>
                   {t("dashboard.widgets.dimensionLabel")}
                 </option>
-                {manifest.allowed_dimensions.map((dim) => (
+                {capabilities.dimensions.map((dim) => (
                   <option key={dim} value={dim}>
                     {t(`dashboard.widgets.dimension.${dim}` as TranslationKey)}
                   </option>
@@ -213,7 +261,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
                 <option value="" disabled>
                   {t("dashboard.widgets.metricLabel")}
                 </option>
-                {manifest.allowed_metrics.map((m) => (
+                {capabilities.metrics.map((m) => (
                   <option key={m} value={m}>
                     {t(`dashboard.widgets.metric.${m}` as TranslationKey)}
                   </option>
@@ -233,14 +281,14 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
                   <option value="" disabled>
                     {t("dashboard.widgets.transactionTypeLabel")}
                   </option>
-                  <option value="expense">{t("transactions.expense")}</option>
-                  <option value="income">{t("transactions.income")}</option>
-                  <option value="transfer">{t("transactions.transfer")}</option>
+                  {(capabilities.spec.filter_options.transaction_type ?? []).map((type) => (
+                    <option key={type} value={type}>{t(`transactions.${type}` as TranslationKey)}</option>
+                  ))}
                 </Select>
               </div>
             )}
 
-            {manifest.needs_granularity && (
+            {needsGranularity && (
               <div>
                 <Label htmlFor="widget-granularity">{t("dashboard.widgets.granularityLabel")}</Label>
                 <Select
@@ -252,14 +300,14 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
                   <option value="" disabled>
                     {t("dashboard.widgets.granularityLabel")}
                   </option>
-                  <option value="day">{t("dashboard.widgets.granularity.day")}</option>
-                  <option value="week">{t("dashboard.widgets.granularity.week")}</option>
-                  <option value="month">{t("dashboard.widgets.granularity.month")}</option>
+                  {(capabilities.spec.filter_options.granularity ?? []).map((value) => (
+                    <option key={value} value={value}>{t(`dashboard.widgets.granularity.${value}` as TranslationKey)}</option>
+                  ))}
                 </Select>
               </div>
             )}
 
-            {accounts && accounts.length > 0 && (
+            {supportsAccountFilter && accounts && accounts.length > 0 && (
               <div>
                 <Label htmlFor="widget-account">{t("dashboard.widgets.accountFilterLabel")}</Label>
                 <Select id="widget-account" value={accountId} onChange={(event) => setAccountId(event.target.value)}>
@@ -281,7 +329,7 @@ export function AddWidgetModal({ open, onClose, year, month, widget }: AddWidget
           <Button type="button" variant="secondary" onClick={handleClose}>
             {t("common.cancel")}
           </Button>
-          <Button type="submit" disabled={!chartType || !dimension || !metric || isSaving}>
+          <Button type="submit" disabled={!capabilities || !dimension || !metric || isSaving}>
             {widget ? t("dashboard.widgets.saveEditButton") : t("dashboard.widgets.saveButton")}
           </Button>
         </div>

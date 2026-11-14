@@ -1,7 +1,8 @@
 """A user-added Dashboard chart — the fixed "Spending by category"/"Income by
 category" donuts stay hardcoded on the page and never go through this table;
 this is only for widgets added via the "Add widget" constructor. See
-services/diagrams.py for how a row here turns into actual chart data."""
+services/dashboard_widget_service.py and the registered DataSource/Diagram
+pipeline for how a row here turns into actual chart data."""
 from sqlalchemy import Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +15,10 @@ class DashboardWidget(Base, TimestampMixin):
     __tablename__ = "dashboard_widgets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Explicit source/spec identity keeps persisted configurations extensible
+    # while old rows receive the transactions/analytics defaults in migration.
+    data_source: Mapped[str] = mapped_column(String(50), nullable=False, default="transactions")
+    data_spec: Mapped[str] = mapped_column(String(80), nullable=False, default="analytics")
     type: Mapped[WidgetType] = mapped_column(
         Enum(WidgetType, name="dashboard_widget_type", native_enum=False, length=10), nullable=False
     )
@@ -24,8 +29,8 @@ class DashboardWidget(Base, TimestampMixin):
     metric: Mapped[WidgetMetric] = mapped_column(
         Enum(WidgetMetric, name="dashboard_widget_metric", native_enum=False, length=10), nullable=False
     )
-    # Required for every dimension except TOTAL — see services/diagrams.py's
-    # Diagram._validate. Summing income+expense+transfer together in one bar
+    # Required for every transaction dimension except TYPE — validated by
+    # TransactionAnalyticsDataSpec. Summing income+expense+transfer in one bar
     # is meaningless, so a widget is always scoped to one transaction type
     # unless it's explicitly breaking totals down *by* type.
     transaction_type: Mapped[TransactionType | None] = mapped_column(
