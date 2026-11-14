@@ -1,5 +1,5 @@
 import { api } from "@/api/client";
-import type { DashboardWidget, DashboardWidgetInput, DashboardWidgetManifest, WidgetType } from "@/types";
+import type { DashboardConfig, DashboardWidgetsResponse, DashboardWidget, DashboardWidgetManifest, WidgetType } from "@/types";
 
 /** Resolve data capabilities for a chart without maintaining client-side
  * lists of dimensions, metrics, sources, filters, or validation rules. */
@@ -40,17 +40,9 @@ export function fetchWidgetTypes() {
 }
 
 export function fetchDashboardWidgets(year: number, month: number) {
-  return api.get<DashboardWidget[]>(`/dashboard/widgets?year=${year}&month=${month}`);
+  return api.get<DashboardWidgetsResponse>(`/dashboard/widgets?year=${year}&month=${month}`);
 }
 
-export function createDashboardWidget(input: DashboardWidgetInput, year: number, month: number) {
-  return api.post<DashboardWidget>(`/dashboard/widgets?year=${year}&month=${month}`, input);
-}
-
-export function updateDashboardWidget(id: number, input: DashboardWidgetInput, year: number, month: number) {
-  return api.patch<DashboardWidget>(`/dashboard/widgets/${id}?year=${year}&month=${month}`, input);
-}
-
-export function deleteDashboardWidget(id: number) {
-  return api.delete<void>(`/dashboard/widgets/${id}`);
+export function saveDashboardWidgets(config: DashboardConfig, year: number, month: number) {
+  return api.put<DashboardWidgetsResponse>(`/dashboard/widgets?year=${year}&month=${month}`, config);
 }
