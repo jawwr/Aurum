@@ -31,7 +31,8 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
 выполняет запросы источника. Реализованная
 `TransactionAnalyticsDataSpec` поддерживает:
 
-- измерения `category`, `subcategory`, `account`, `tag`, `type`, `total`;
+- измерения `category`, `subcategory`, `account`, `tag`, `type`,
+  `item`, `total`;
 - метрики `sum` и `count`;
 - фильтры `transaction_type`, `account_id`, `start_date`, `end_date`, `granularity`;
 - гранулярность `day`, `week`, `month` для временного измерения `total`.
@@ -39,7 +40,24 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
 Спецификация сохраняет текущие финансовые правила: split-транзакции проходят
 через `category_rollup`, `category` выполняет rollup в верхнюю категорию,
 `subcategory` оставляет листовые категории, а `count` считает уникальную
-транзакцию внутри каждого итогового элемента.
+транзакцию внутри каждого итогового элемента. Измерение `item`
+(«без группировки») не агрегирует вовсе: одна строка — одна транзакция с её
+суммой, только метрика `sum` (запрет `count` объявлен в
+`forbidden_metrics_by_dimension` и попадает в manifest), `transaction_type`
+остаётся необязательным фильтром, порядок — newest-first. Для категорий,
+подкатегорий, счетов, тегов и временного итога `transaction_type` также можно не задавать:
+`null` означает все типы операций; при заданном значении фильтр применяется
+до агрегации. Для измерения `type` фильтр запрещён, поскольку оно само
+группирует данные по типу операции.
+
+При построении List для метрики `sum` DataSpec сохраняет направление суммы:
+расходы возвращаются отрицательными, доходы и переводы — положительными.
+Для этого SQL-запрос использует `CASE` по `Transaction.type` и явный
+`CAST(... AS NUMERIC(14, 2))` до передачи значения в Dataset. Это исключает
+сортировку строковых/положительных исходных `amount` и даёт ListDiagram
+обычный числовой порядок: `value_desc` от большего к меньшему,
+`value_asc` от меньшего к большему. Для Pie/Bar/Line сохраняются прежние
+значения и финансовые контракты.
 
 ### Dataset
 
@@ -66,7 +84,11 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
   объединяет хвост в `Other`;
 - `BarDiagram` сортирует точки по убыванию значения;
 - `LineDiagram` принимает временной Dataset с одним рядом и сортирует его по
-  bucket.
+  bucket;
+- `ListDiagram` строит вертикальный список строк: сортировка и лимит
+  задаются опциями `visualization.options` (`sort`:
+  `none`/`value_asc`/`value_desc`, `limit`, по умолчанию 5) и валидируются
+  на Backend — см. `docs/dashboard-widgets/list-widget.md`.
 
 Диаграммы не импортируют ORM-модели, не строят SQL и не применяют финансовые
 фильтры. Метод `render(dataset)` — единственный путь получения данных для
@@ -85,8 +107,17 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
 новой спецификации — `register_data_spec()`.
 
 Совместимость вычисляется по типу Dataset: Pie и Bar работают с
-`categorical`, Line — с `time_series`. Поэтому Backend может отдать в manifest
-совместимые измерения, метрики и DataSpec без SQL-логики в диаграммах.
+`categorical`, Line — с `time_series`. Дополнительно Pie и Bar исключают
+измерение `item` (сырые строки транзакций не являются осмысленной группой для
+этих диаграмм), а List оставляет его доступным. Поэтому Backend может отдать
+в manifest совместимые измерения, метрики и DataSpec без SQL-логики в
+диаграммах.
+
+Ограничение `item` действует для предлагаемых в manifest вариантов. Старые
+сохранённые pie/bar с `item` по-прежнему принимаются и отображаются: данные не
+мигрируются и не отбрасываются. При редактировании в форме нужно выбрать
+поддерживаемую группировку. Старое имя измерения `transaction` схема читает
+как `item` и сохраняет под актуальным именем.
 
 ## Хранение конфигурации
 
@@ -172,6 +203,7 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
             "account",
             "tag",
             "type",
+            "item",
             "total"
           ],
           "metrics": [
@@ -191,11 +223,11 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
           ],
           "dimension_kinds": {
             "category": "categorical",
+            "item": "categorical",
             "total": "time_series"
           },
           "required_by_dimension": {
             "total": [
-              "transaction_type",
               "granularity"
             ]
           },
@@ -203,6 +235,14 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
             "type": [
               "transaction_type",
               "granularity"
+            ],
+            "item": [
+              "granularity"
+            ]
+          },
+          "forbidden_metrics_by_dimension": {
+            "item": [
+              "count"
             ]
           },
           "filter_options": {
@@ -220,7 +260,8 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
           "compatible_diagrams": [
             "pie",
             "bar",
-            "line"
+            "line",
+            "list"
           ]
         }
       ]
@@ -279,6 +320,26 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
       "compatible_data_specs": [
         "transactions:analytics"
       ]
+    },
+    {
+      "type": "list",
+      "dataset_kind": "categorical",
+      "allowed_dimensions": [
+        "category",
+        "subcategory",
+        "account",
+        "tag",
+        "type",
+        "item"
+      ],
+      "allowed_metrics": [
+        "sum",
+        "count"
+      ],
+      "needs_granularity": false,
+      "compatible_data_specs": [
+        "transactions:analytics"
+      ]
     }
   ]
 }
@@ -292,7 +353,10 @@ DATA_SOURCE_REGISTRY = {"transactions": TransactionDataSource()}
 сбрасываются. Для диаграммы используется первая совместимая спецификация
 выбранного источника; при редактировании предпочтение отдаётся сохранённой
 спецификации. Отдельного селектора спецификации нет. Идентификаторы источника
-и спецификации отправляются в конфигурации.
+и спецификации отправляются в конфигурации. Метрики фильтруются по
+выбранному измерению через `forbidden_metrics_by_dimension` из manifest,
+так что форма не предлагает пару измерение+метрика, которую Backend
+отверг бы.
 
 ## GET и PUT Dashboard
 
@@ -374,10 +438,19 @@ SQL-логика находится в `TransactionAnalyticsDataSpec` и
 
 Затем DataSpec выбирает группировку: `category` использует category rollup,
 `subcategory` сохраняет листовые категории, `account` группирует по счетам,
-`tag` соединяет таблицы тегов, `type` группирует по типам, а `total` использует
+`tag` соединяет таблицы тегов, `type` группирует по типам, `item`
+вовсе не группирует — по одной строке на транзакцию с её суммой (порядок
+newest-first, иконка/цвет от категории), а `total` использует
 `date_trunc(granularity, Transaction.date)`. `sum` использует сумму, `count`
-сохраняет правила подсчёта транзакций конкретного измерения. Split-транзакции
+сохраняет правила подсчёта транзакций конкретного измерения (для
+`item` метрика `count` запрещена). Split-транзакции
 и фильтрация до агрегации тем самым сохраняют текущую финансовую семантику.
+
+Для raw-измерения `item` SQL также выбирает signed amount непосредственно в
+строке транзакции. Порядок `sort: none` остаётся `date DESC, id DESC`; когда
+ListDiagram применяет `value_asc` или `value_desc`, он сравнивает уже
+числовые signed-значения Dataset, а не положительный исходный `amount` и не
+его абсолютную величину.
 
 Для `year=2026&month=9` передаются даты `2026-09-01` и `2026-09-30`; для
 временных виджетов дополнительно применяется `day`, `week` или `month`.
@@ -436,10 +509,11 @@ manifest и тесты сортировки, агрегации и обрабо�
 
 `backend/tests/test_dashboard_widget_architecture.py` проверяет регистрацию
 источника и спецификации, валидацию конфигурации, общий Dataset, отсутствие
-ORM-зависимости Diagram, правила Pie/Bar/Line, GET/PUT-разделение конфигурации
+ORM-зависимости Diagram, правила Pie/Bar/Line/List, GET/PUT-разделение конфигурации
 и данных, порядок, атомарность невалидного сохранения, ссылки и manifest.
 `backend/tests/test_dashboard_widget_queries.py` проверяет SQL-агрегации и
 фильтрацию до агрегации, включая split-транзакции, rollup, временные bucket'ы
 и `count`. `frontend/src/api/dashboardWidgets.test.ts` проверяет полный PUT,
 а `frontend/src/lib/dashboardConfig.test.ts` — clone, upsert, удаление и
-порядок локального draft.
+порядок локального draft. List-виджет покрыт тестами из
+`docs/dashboard-widgets/list-widget.md`.

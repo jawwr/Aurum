@@ -13,6 +13,7 @@ import {useDashboardSummary} from "@/hooks/useDashboard";
 import {usePageParams} from "@/hooks/usePageParams";
 import {useTransactionYears} from "@/hooks/useTransactions";
 import {useDashboardWidgets, useSaveDashboardWidgets} from "@/hooks/useDashboardWidgets";
+import {buildVisualizationOptions} from "@/lib/dashboardConfig";
 import {formatCurrency, formatSignedCurrency} from "@/lib/format";
 import {useTranslation} from "@/lib/i18n";
 import {monthParam, yearParam} from "@/lib/pageParams";
@@ -89,7 +90,7 @@ export function DashboardPage() {
                     filters: {transaction_type: input.transaction_type, account_id: input.account_id},
                     granularity: input.granularity,
                 },
-                visualization: {type: input.type, options: {}},
+                visualization: {type: input.type, options: buildVisualizationOptions(input)},
             };
             return {...current, widgets: editingWidget
                 ? current.widgets.map((item) => item.id === editingWidget.id ? widget : item)

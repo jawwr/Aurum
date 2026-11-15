@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date as date_
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import Numeric, case, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
@@ -63,10 +63,11 @@ class CategoryRollupItem:
 async def raw_category_contributions(
     session: AsyncSession,
     *,
-    transaction_type: TransactionType,
+    transaction_type: TransactionType | None,
     start_date: date_ | None,
     end_date: date_ | None,
     account_id: int | None = None,
+    signed: bool = False,
 ) -> list[tuple[int, int, Decimal]]:
     """(transaction_id, category_id, amount) for every category a
     transaction of this type/date-range contributed to. A plain transaction
@@ -79,14 +80,26 @@ async def raw_category_contributions(
     TransactionAnalyticsDataSpec's subcategory dimension wants these leaf-level
     contributions as-is, without the parent rollup this module otherwise
     exists for."""
-    plain_stmt = select(Transaction.id, Transaction.category_id, Transaction.amount).where(
-        Transaction.type == transaction_type, Transaction.category_id.is_not(None)
-    )
+    def signed_amount(amount_column):
+        return cast(
+            case(
+                (Transaction.type == TransactionType.EXPENSE, -amount_column),
+                else_=amount_column,
+            ),
+            Numeric(14, 2),
+        )
+
+    plain_amount = signed_amount(Transaction.amount) if signed else Transaction.amount
+    split_amount = signed_amount(TransactionSplit.amount) if signed else TransactionSplit.amount
+    plain_stmt = select(Transaction.id, Transaction.category_id, plain_amount).where(Transaction.category_id.is_not(None))
     split_stmt = (
-        select(TransactionSplit.transaction_id, TransactionSplit.category_id, TransactionSplit.amount)
+        select(TransactionSplit.transaction_id, TransactionSplit.category_id, split_amount)
         .join(Transaction, Transaction.id == TransactionSplit.transaction_id)
-        .where(Transaction.type == transaction_type, TransactionSplit.category_id.is_not(None))
+        .where(TransactionSplit.category_id.is_not(None))
     )
+    if transaction_type is not None:
+        plain_stmt = plain_stmt.where(Transaction.type == transaction_type)
+        split_stmt = split_stmt.where(Transaction.type == transaction_type)
     if start_date is not None:
         plain_stmt = plain_stmt.where(Transaction.date >= start_date)
         split_stmt = split_stmt.where(Transaction.date >= start_date)
@@ -99,22 +112,24 @@ async def raw_category_contributions(
 
     plain_rows = (await session.execute(plain_stmt)).all()
     split_rows = (await session.execute(split_stmt)).all()
-    return [(r[0], r[1], r[2]) for r in plain_rows] + [(r[0], r[1], r[2]) for r in split_rows]
+    return [(row[0], row[1], row[2]) for row in plain_rows] + [(row[0], row[1], row[2]) for row in split_rows]
 
 
 async def rollup_spending_by_top_level_category(
     session: AsyncSession,
     *,
-    transaction_type: TransactionType,
+    transaction_type: TransactionType | None,
     start_date: date_ | None = None,
     end_date: date_ | None = None,
     account_id: int | None = None,
+    signed: bool = False,
 ) -> list[CategoryRollupItem]:
     """Every top-level category's total for the period, sorted by amount
     desc (category sort_order as tiebreak — same order the SQL-only version
     used to produce)."""
     contributions = await raw_category_contributions(
-        session, transaction_type=transaction_type, start_date=start_date, end_date=end_date, account_id=account_id
+        session, transaction_type=transaction_type, start_date=start_date, end_date=end_date,
+        account_id=account_id, signed=signed,
     )
     if not contributions:
         return []
@@ -140,7 +155,9 @@ async def rollup_spending_by_top_level_category(
         leaf_amounts = amount_by_leaf[effective_id]
         children: list[CategoryRollupChildItem] = []
         if len(leaf_amounts) > 1:
-            for leaf_id, leaf_amount in sorted(leaf_amounts.items(), key=lambda pair: -pair[1]):
+            for leaf_id, leaf_amount in sorted(
+                leaf_amounts.items(), key=lambda pair: -abs(pair[1]) if signed else -pair[1]
+            ):
                 leaf_category = categories_by_id.get(leaf_id)
                 children.append(
                     CategoryRollupChildItem(
@@ -163,5 +180,5 @@ async def rollup_spending_by_top_level_category(
                 children=children,
             )
         )
-    items.sort(key=lambda item: (-item.amount, item.sort_order))
+    items.sort(key=lambda item: (-abs(item.amount), item.sort_order) if signed else (-item.amount, item.sort_order))
     return items

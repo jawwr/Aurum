@@ -13,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Mapping
 
-from sqlalchemy import func, select
+from sqlalchemy import Numeric, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
@@ -35,8 +35,27 @@ def _decimal(value: Any) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(value)
 
 
-def _metric_column(metric: str):
-    return func.sum(Transaction.amount) if metric == "sum" else func.count(Transaction.id)
+def _signed_amount_column():
+    """Return the transaction amount with its financial sign in SQL.
+
+    ``Transaction.amount`` is stored as a positive Numeric and ``type`` owns
+    the direction.  Keeping this conversion in the SELECT expression means
+    raw list rows and aggregate queries expose the same numeric value to the
+    renderer; Python must not turn a database value represented as a string
+    into a different sort key later.
+    """
+    return cast(
+        case(
+            (Transaction.type == TransactionType.EXPENSE, -Transaction.amount),
+            else_=Transaction.amount,
+        ),
+        Numeric(14, 2),
+    )
+
+
+def _metric_column(metric: str, signed: bool = False):
+    amount = _signed_amount_column() if signed else Transaction.amount
+    return func.sum(amount) if metric == "sum" else func.count(Transaction.id)
 
 
 def _date_value(value: date_ | datetime) -> date_:
@@ -54,6 +73,7 @@ class DataSpec(ABC):
     dimension_kinds: Mapping[str, DatasetKind] = {}
     required_by_dimension: Mapping[str, tuple[str, ...]] = {}
     forbidden_by_dimension: Mapping[str, tuple[str, ...]] = {}
+    forbidden_metrics_by_dimension: Mapping[str, tuple[str, ...]] = {}
     filter_options: Mapping[str, tuple[str, ...]] = {}
     source: DataSource
 
@@ -108,7 +128,7 @@ class TransactionAnalyticsDataSpec(DataSpec):
     """Aggregated transaction data used by the current dashboard widgets."""
 
     id = "analytics"
-    dimensions = ("category", "subcategory", "account", "tag", "type", "total")
+    dimensions = ("category", "subcategory", "account", "tag", "type", "item", "total")
     metrics = ("sum", "count")
     supported_filters = ("transaction_type", "account_id", "start_date", "end_date", "granularity")
     required_parameters = ("dimension", "metric")
@@ -118,14 +138,11 @@ class TransactionAnalyticsDataSpec(DataSpec):
         "account": "categorical",
         "tag": "categorical",
         "type": "categorical",
+        "item": "categorical",
         "total": "time_series",
     }
     required_by_dimension = {
-        "category": ("transaction_type",),
-        "subcategory": ("transaction_type",),
-        "account": ("transaction_type",),
-        "tag": ("transaction_type",),
-        "total": ("transaction_type", "granularity"),
+        "total": ("granularity",),
     }
     forbidden_by_dimension = {
         "category": ("granularity",),
@@ -133,6 +150,12 @@ class TransactionAnalyticsDataSpec(DataSpec):
         "account": ("granularity",),
         "tag": ("granularity",),
         "type": ("transaction_type", "granularity"),
+        "item": ("granularity",),
+    }
+    # A raw item row is not a group: it carries its own amount, so "count"
+    # has no meaning (it would always be 1). Sum is the only metric.
+    forbidden_metrics_by_dimension = {
+        "item": ("count",),
     }
     filter_options = {
         "transaction_type": ("expense", "income", "transfer"),
@@ -142,7 +165,7 @@ class TransactionAnalyticsDataSpec(DataSpec):
 
     @classmethod
     def validate_config(cls, config: Mapping[str, Any]) -> None:
-        allowed = set(cls.required_parameters) | set(cls.supported_filters)
+        allowed = set(cls.required_parameters) | set(cls.supported_filters) | {"signed_amounts"}
         unknown = sorted(set(config) - allowed)
         if unknown:
             raise ValueError(f"Unsupported filter or parameter '{unknown[0]}'")
@@ -164,6 +187,9 @@ class TransactionAnalyticsDataSpec(DataSpec):
         for name in cls.forbidden_by_dimension.get(dimension, ()):
             if config.get(name) is not None:
                 raise ValueError(f"{name} must be omitted for dimension '{dimension}'")
+        for name in cls.forbidden_metrics_by_dimension.get(dimension, ()):
+            if metric == name:
+                raise ValueError(f"metric '{metric}' is not supported for dimension '{dimension}'")
         for name, options in cls.filter_options.items():
             if config.get(name) is not None and _value(config[name]) not in options:
                 raise ValueError(f"{name} is not supported")
@@ -197,13 +223,13 @@ class TransactionAnalyticsDataSpec(DataSpec):
         return self.source.filter_query(statement, self.config)
 
     async def _category_items(self, session: AsyncSession) -> list[DatasetItem]:
-        assert self.transaction_type is not None
         rows = await rollup_spending_by_top_level_category(
             session,
             transaction_type=self.transaction_type,
             start_date=self.config.get("start_date"),
             end_date=self.config.get("end_date"),
             account_id=self.config.get("account_id"),
+            signed=self.config.get("signed_amounts", False),
         )
         return [
             DatasetItem(
@@ -218,13 +244,13 @@ class TransactionAnalyticsDataSpec(DataSpec):
         ]
 
     async def _subcategory_items(self, session: AsyncSession) -> list[DatasetItem]:
-        assert self.transaction_type is not None
         contributions = await raw_category_contributions(
             session,
             transaction_type=self.transaction_type,
             start_date=self.config.get("start_date"),
             end_date=self.config.get("end_date"),
             account_id=self.config.get("account_id"),
+            signed=self.config.get("signed_amounts", False),
         )
         if not contributions:
             return []
@@ -253,7 +279,7 @@ class TransactionAnalyticsDataSpec(DataSpec):
 
     async def _account_items(self, session: AsyncSession) -> list[DatasetItem]:
         statement = (
-            select(Account.id, Account.name, Account.color, _metric_column(self.metric))
+            select(Account.id, Account.name, Account.color, _metric_column(self.metric, self.config.get("signed_amounts", False)))
             .select_from(Transaction)
             .join(Account, Account.id == Transaction.account_id)
             .group_by(Account.id, Account.name, Account.color)
@@ -267,7 +293,7 @@ class TransactionAnalyticsDataSpec(DataSpec):
 
     async def _tag_items(self, session: AsyncSession) -> list[DatasetItem]:
         statement = (
-            select(Tag.id, Tag.name, _metric_column(self.metric))
+            select(Tag.id, Tag.name, _metric_column(self.metric, self.config.get("signed_amounts", False)))
             .select_from(Transaction)
             .join(transaction_tags, transaction_tags.c.transaction_id == Transaction.id)
             .join(Tag, Tag.id == transaction_tags.c.tag_id)
@@ -281,7 +307,7 @@ class TransactionAnalyticsDataSpec(DataSpec):
         ]
 
     async def _type_items(self, session: AsyncSession) -> list[DatasetItem]:
-        statement = select(Transaction.type, _metric_column(self.metric)).group_by(Transaction.type)
+        statement = select(Transaction.type, _metric_column(self.metric, self.config.get("signed_amounts", False))).group_by(Transaction.type)
         statement = self._where(statement)
         rows = (await session.execute(statement)).all()
         colors = {"income": "#3aa76d", "expense": "#d6564a", "transfer": "#898781"}
@@ -296,11 +322,45 @@ class TransactionAnalyticsDataSpec(DataSpec):
             for transaction_type, value in rows
         ]
 
+    async def _transaction_items(self, session: AsyncSession) -> list[DatasetItem]:
+        """The "item" dimension for the transactions source: one row per raw
+        transaction — no grouping, no aggregation.
+
+        Value is the transaction's own amount, ``transaction_type`` stays an
+        optional filter (a raw listing may mix income, expense, and transfer
+        the way the recent-transactions card does), and the source order is
+        newest-first so a list widget with ``sort: none`` reads like a
+        transaction feed. Splits keep their transaction-level category
+        (null), so icon/color fall back on the frontend rather than being
+        invented here. Key prefixes describe the entity ("transaction:{id}"),
+        not the dimension — another source's items would carry their own.
+        """
+        amount = _signed_amount_column() if self.config.get("signed_amounts", False) else Transaction.amount
+        statement = (
+            select(Transaction.id, Transaction.description, amount, Category.icon, Category.color)
+            .select_from(Transaction)
+            .join(Category, Category.id == Transaction.category_id, isouter=True)
+            .order_by(Transaction.date.desc(), Transaction.id.desc())
+        )
+        statement = self._where(statement)
+        rows = (await session.execute(statement)).all()
+        return [
+            DatasetItem(
+                element_id=transaction_id,
+                key=f"transaction:{transaction_id}",
+                name=description,
+                value=_decimal(amount),
+                icon=icon,
+                color=color,
+            )
+            for transaction_id, description, amount, icon, color in rows
+        ]
+
     async def _total_items(self, session: AsyncSession) -> list[DatasetItem]:
         granularity = _value(self.config["granularity"])
         bucket = func.date_trunc(granularity, Transaction.date)
         statement = (
-            select(bucket.label("bucket"), _metric_column(self.metric))
+            select(bucket.label("bucket"), _metric_column(self.metric, self.config.get("signed_amounts", False)))
             .group_by("bucket")
             .order_by("bucket")
         )
@@ -329,6 +389,8 @@ class TransactionAnalyticsDataSpec(DataSpec):
             items = await self._tag_items(session)
         elif self.dimension == "type":
             items = await self._type_items(session)
+        elif self.dimension == "item":
+            items = await self._transaction_items(session)
         else:
             items = await self._total_items(session)
         return Dataset(items=items, kind=self.result_kind(self.dimension))

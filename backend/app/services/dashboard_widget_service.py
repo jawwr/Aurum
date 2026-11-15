@@ -5,7 +5,6 @@ from datetime import date as date_
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import WidgetType
 from app.models.settings import AppSettings
 from app.schemas.dashboard_widget import (
     DashboardConfig,
@@ -18,6 +17,7 @@ from app.schemas.dashboard_widget import (
     DiagramDataRead,
     DiagramPointRead,
     WidgetTypeManifestEntry,
+    WidgetVisualization,
 )
 from app.services.data_sources import DATA_SOURCE_REGISTRY, DataSpec, get_data_source
 from app.services.diagrams import DIAGRAM_REGISTRY, Diagram
@@ -29,7 +29,12 @@ def _spec_key(source_id: str, spec_id: str) -> str:
 
 
 def _compatible_dimensions(spec_cls: type[DataSpec], diagram_cls: type[Diagram]) -> list[str]:
-    return [dimension for dimension in spec_cls.dimensions if spec_cls.result_kind(dimension) == diagram_cls.dataset_kind]
+    return [
+        dimension
+        for dimension in spec_cls.dimensions
+        if spec_cls.result_kind(dimension) == diagram_cls.dataset_kind
+        and dimension not in diagram_cls.forbidden_dimensions
+    ]
 
 
 def list_widget_types() -> DashboardWidgetManifest:
@@ -46,6 +51,7 @@ def list_widget_types() -> DashboardWidgetManifest:
                     dimension_kinds=dict(spec_cls.dimension_kinds),
                     required_by_dimension={key: list(value) for key, value in spec_cls.required_by_dimension.items()},
                     forbidden_by_dimension={key: list(value) for key, value in spec_cls.forbidden_by_dimension.items()},
+                    forbidden_metrics_by_dimension={key: list(value) for key, value in spec_cls.forbidden_metrics_by_dimension.items()},
                     filter_options={key: list(value) for key, value in spec_cls.filter_options.items()},
                     compatible_diagrams=[diagram_cls.type for diagram_cls in DIAGRAM_REGISTRY.values() if _compatible_dimensions(spec_cls, diagram_cls)],
                 )
@@ -89,22 +95,25 @@ def _fields_config(widget: DashboardWidgetConfig, *, start: date_ | None, end: d
     }
 
 
-def _build_diagram(widget_type: WidgetType) -> Diagram:
-    diagram_cls = DIAGRAM_REGISTRY.get(widget_type)
+def _build_diagram(visualization: WidgetVisualization) -> Diagram:
+    diagram_cls = DIAGRAM_REGISTRY.get(visualization.type)
     if diagram_cls is None:
-        raise ValueError(f"Unsupported diagram type '{widget_type.value}'")
-    return diagram_cls()
+        raise ValueError(f"Unsupported diagram type '{visualization.type.value}'")
+    return diagram_cls.from_options(visualization.options)
 
 
 def _build_spec(widget: DashboardWidgetConfig, start: date_ | None, end: date_ | None) -> DataSpec:
     source = get_data_source(widget.data_source)
-    return source.create_spec(widget.data_spec, config=_fields_config(widget, start=start, end=end))
+    config = _fields_config(widget, start=start, end=end)
+    if widget.data_source == "transactions" and widget.data_spec == "analytics" and widget.visualization.type.value == "list":
+        config["signed_amounts"] = True
+    return source.create_spec(widget.data_spec, config=config)
 
 
 def _validate_widget_config(widget: DashboardWidgetConfig) -> DataSpec:
     try:
         spec = _build_spec(widget, start=None, end=None)
-        if spec.result_kind(widget.query.dimension) != _build_diagram(widget.visualization.type).dataset_kind:
+        if spec.result_kind(widget.query.dimension) != _build_diagram(widget.visualization).dataset_kind:
             raise ValueError(f"Data spec dimension is not compatible with a {widget.visualization.type.value} widget")
         return spec
     except ValueError as exc:
@@ -122,7 +131,7 @@ async def _validate_config_references(session: AsyncSession, config: DashboardCo
 
 async def _render_widget(session: AsyncSession, widget: DashboardWidgetConfig, start: date_, end: date_) -> DashboardWidgetDataRead:
     try:
-        diagram = _build_diagram(widget.visualization.type)
+        diagram = _build_diagram(widget.visualization)
         data = diagram.render(await _build_spec(widget, start=start, end=end).fetch(session))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

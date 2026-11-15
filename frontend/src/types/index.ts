@@ -197,10 +197,13 @@ export interface DashboardSummary {
   spending_by_category: CategoryBreakdownItem[];
 }
 
-export type WidgetType = "pie" | "bar" | "line";
-export type WidgetDimension = "category" | "subcategory" | "account" | "tag" | "type" | "total";
+export type WidgetType = "pie" | "bar" | "line" | "list";
+export type WidgetDimension = "category" | "subcategory" | "account" | "tag" | "type" | "item" | "total";
 export type WidgetMetric = "sum" | "count";
 export type WidgetGranularity = "day" | "week" | "month";
+// List-widget row ordering — "none" shows the DataSource's own order, the
+// backend never applies a hidden sort.
+export type WidgetSort = "none" | "value_asc" | "value_desc";
 
 export interface DataSpecManifestEntry {
   id: string;
@@ -211,6 +214,10 @@ export interface DataSpecManifestEntry {
   dimension_kinds: Record<string, "categorical" | "time_series">;
   required_by_dimension: Record<string, string[]>;
   forbidden_by_dimension: Record<string, string[]>;
+  // Optional at runtime: the current backend always sends it, but a manifest
+  // cached by React Query (staleTime: Infinity) from a session started
+  // before the backend update predates the field — reading it must not crash.
+  forbidden_metrics_by_dimension?: Record<string, string[]>;
   filter_options: Record<string, string[]>;
   compatible_diagrams: WidgetType[];
 }
@@ -301,6 +308,10 @@ export interface DashboardWidgetInput {
   transaction_type: TransactionType | null;
   granularity: WidgetGranularity | null;
   account_id: number | null;
+  // List-widget only; null/omitted for the chart types, whose options stay
+  // the empty object they've always saved.
+  sort?: WidgetSort | null;
+  limit?: number | null;
 }
 
 export type AssetClass = "investments" | "crypto" | "real_estate" | "vehicles" | "precious_metals" | "other";
