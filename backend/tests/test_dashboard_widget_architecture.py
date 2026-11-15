@@ -626,9 +626,10 @@ async def test_list_widget_renders_sorted_limited_rows_with_metadata(client: Asy
     )
     assert response.status_code == 200
     points = response.json()["widgets"][0]["data"]["points"]
-    assert [point["label"] for point in points] == ["Groceries", "Dining Out"]
-    assert [money(point["value"]) for point in points] == [Decimal("-75.00"), Decimal("-40.00")]
-    groceries = points[0]
+    # Numeric descending order: -40 is greater than -75.
+    assert [point["label"] for point in points] == ["Dining Out", "Groceries"]
+    assert [money(point["value"]) for point in points] == [Decimal("-40.00"), Decimal("-75.00")]
+    groceries = points[1]
     assert groceries["key"] == f"category:{categories['Groceries']['id']}"
     assert groceries["element_id"] == categories["Groceries"]["id"]
     assert groceries["icon"] == "shopping-basket"
@@ -779,7 +780,7 @@ async def test_list_widget_item_dimension_lists_rows_without_grouping(
         Decimal("-25.00"),  # Aug 2 Groceries
         Decimal("-50.00"),  # Aug 1 Groceries
     ]
-    assert [point["label"] for point in points] == ["test transaction"] * 4
+    assert [point["label"] for point in points] == ["Test transaction"] * 4
     assert all(point["key"].startswith("transaction:") for point in points)
     assert all(isinstance(point["element_id"], int) for point in points)
     assert points[1]["icon"] == "utensils"

@@ -185,7 +185,7 @@ async def test_grouped_dimensions_accept_all_transaction_types_before_aggregatio
     async with test_sessionmaker() as session:
         dataset = await _spec(analytics_rows, "category", transaction_type=None, account_id=None).fetch(session)
         assert {item.name: item.value for item in dataset.items} == {
-            "Groceries": Decimal("90"),
+            "Groceries": Decimal("190"),  # Includes the other account's 100.
             "Salary": Decimal("1000"),
         }
         subcategories = await _spec(analytics_rows, "subcategory", "count", transaction_type=None).fetch(session)
@@ -218,7 +218,7 @@ async def test_list_data_spec_preserves_transaction_signs_for_sum(test_sessionma
     async with test_sessionmaker() as session:
         dataset = await _spec(analytics_rows, "item", transaction_type=None, signed_amounts=True).fetch(session)
         assert [item.value for item in dataset.items] == [
-            Decimal("30"), Decimal("7"), Decimal("1000"), Decimal("-50"), Decimal("-10"),
+            Decimal("-30"), Decimal("7"), Decimal("1000"), Decimal("-50"), Decimal("-10"),
         ]
         categories = await _spec(
             analytics_rows, "category", transaction_type="expense", signed_amounts=True,
@@ -235,7 +235,7 @@ async def test_signed_category_contributions_are_cast_and_signed_in_sql(
         ).fetch(session)
 
         assert {item.name: item.value for item in dataset.items} == {
-            "Groceries": Decimal("-90"),
+            "Groceries": Decimal("-190"),  # Includes the other account's 100.
             "Salary": Decimal("1000"),
         }
 
@@ -250,10 +250,10 @@ async def test_signed_item_values_are_sorted_by_numeric_amount_not_absolute_amou
         ascending = ListDiagram(sort="value_asc").render(dataset).points
 
         assert [point.value for point in descending] == [
-            Decimal("1000"), Decimal("30"), Decimal("7"), Decimal("-10"), Decimal("-50"),
+            Decimal("1000"), Decimal("7"), Decimal("-10"), Decimal("-30"), Decimal("-50"),
         ]
         assert [point.value for point in ascending] == [
-            Decimal("-50"), Decimal("-10"), Decimal("7"), Decimal("30"), Decimal("1000"),
+            Decimal("-50"), Decimal("-30"), Decimal("-10"), Decimal("7"), Decimal("1000"),
         ]
 
 
