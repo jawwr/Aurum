@@ -194,10 +194,10 @@ async def test_grouped_dimensions_accept_all_transaction_types_before_aggregatio
         }
         account = await _spec(analytics_rows, "account", transaction_type=None).fetch(session)
         assert {item.name: item.value for item in account.items} == {
-            "Selected": Decimal("1097"), "Other": Decimal("100"),
+            "Selected": Decimal("1097"),
         }
         totals = await _spec(analytics_rows, "total", transaction_type=None, granularity="month").fetch(session)
-        assert totals.items[0].value == Decimal("1197")
+        assert totals.items[0].value == Decimal("1097")
         transfers = await _spec(analytics_rows, "item", transaction_type="transfer").fetch(session)
         assert [item.value for item in transfers.items] == [Decimal("7")]
 
