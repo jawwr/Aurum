@@ -138,7 +138,7 @@ export function ReportsPage() {
 
   function handleModeChange(value: ReportMode) {
     setMode(value);
-    setPage(1);
+    setParams({page: 1});
   }
 
   function handleEdit(transaction: Transaction) {
@@ -165,7 +165,7 @@ export function ReportsPage() {
                 disabled={!tags || tags.length === 0}
                 onChange={(event) => {
                   setTagId(event.target.value ? Number(event.target.value) : null);
-                  setPage(1);
+                  setParams({page: 1});
                 }}
               >
                 {(!tags || tags.length === 0) && <option value="">{t("reports.noTagsYet")}</option>}
@@ -239,7 +239,7 @@ export function ReportsPage() {
             selectedTagId={tagId}
             onSelectTag={(id) => {
               setTagId(id);
-              setPage(1);
+              setParams({page: 1});
             }}
           />
         </>
